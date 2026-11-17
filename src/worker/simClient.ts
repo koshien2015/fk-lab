@@ -4,6 +4,7 @@
 import type { ShotResult, ShotScenario } from '../match/shot.ts';
 import type { PhysicsParams } from '../physics/params.ts';
 import type { KickState, SimOptions, Trajectory } from '../physics/types.ts';
+import type { InverseRequest, InverseSolution } from '../solver/inverse.ts';
 import type { SimRequest, SimResponse } from './protocol.ts';
 
 export interface SimClient {
@@ -11,6 +12,8 @@ export interface SimClient {
   simulate(kick: KickState, params: PhysicsParams, options?: SimOptions): Promise<Trajectory>;
   /** 衝突と判定を含めて 1 本のキックを計算する */
   shot(kick: KickState, params: PhysicsParams, scenario: ShotScenario): Promise<ShotResult>;
+  /** 逆算: 狙った点に入る蹴り方を探す */
+  solve(request: InverseRequest, params: PhysicsParams): Promise<InverseSolution>;
 }
 
 interface Pending {
@@ -59,6 +62,11 @@ export function createSimClient(): SimClient {
       const response = await call({ type: 'shot', kick, params, options: {}, scenario });
       if (response.type !== 'shot') throw new Error('Worker から想定外の応答が返りました');
       return response.result;
+    },
+    async solve(request, params) {
+      const response = await call({ type: 'solve', params, request });
+      if (response.type !== 'solved') throw new Error('Worker から想定外の応答が返りました');
+      return response.solution;
     },
   };
 }

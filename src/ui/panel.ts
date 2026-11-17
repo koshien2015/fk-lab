@@ -1,12 +1,14 @@
 /**
  * 蹴り方を決める操作パネル。
  */
+import { LEGENDS, type Legend } from '../app/legends.ts';
 import { SETUP_LIMITS, SETUP_PRESETS, toKickInput, type KickSetup } from '../app/setup.ts';
 import type { Store } from '../app/store.ts';
 import { distanceToGoal } from '../field/placement.ts';
 import type { KeeperLevel } from '../match/keeper.ts';
 import { describeSpin, type SpinDescription } from '../physics/kick.ts';
 import type { PhysicsParams } from '../physics/params.ts';
+import type { SpinStyle } from '../solver/inverse.ts';
 import { createContactPicker } from './contactPicker.ts';
 import { h, setText } from './dom.ts';
 import { createSliderRow } from './sliderRow.ts';
@@ -19,7 +21,22 @@ export interface PanelActions {
   /** いまの軌道を、比較用に残す */
   readonly onPin: () => void;
   readonly onClearPins: () => void;
+  /** 逆算モード（ゴールの狙う点をクリックして蹴り方を求める）の入り切り */
+  readonly onToggleInverse: () => void;
+  readonly onInverseStyle: (style: SpinStyle) => void;
+  readonly onLegend: (legend: Legend) => void;
 }
+
+export interface InverseState {
+  readonly active: boolean;
+  readonly style: SpinStyle;
+}
+
+const STYLE_CHOICES: ReadonlyArray<{ readonly value: SpinStyle; readonly label: string }> = [
+  { value: 'curve', label: 'カーブ' },
+  { value: 'knuckle', label: 'ナックル' },
+  { value: 'drive', label: 'ドライブ' },
+];
 
 export interface ViewState {
   readonly arrows: boolean;
@@ -35,6 +52,7 @@ export interface PanelView {
   setPlacing(placing: boolean): void;
   setStatus(text: string): void;
   setView(view: ViewState): void;
+  setInverse(state: InverseState): void;
 }
 
 function spinText(spin: SpinDescription): string {
@@ -130,6 +148,17 @@ export function createPanel(
   const pin = chip('この軌道を残す', actions.onPin);
   const clearPins = chip('比較を消す', actions.onClearPins);
 
+  const inverse = chip('ゴールをクリックして逆算', actions.onToggleInverse);
+  const styles = STYLE_CHOICES.map((choice) => ({
+    choice,
+    button: chip(choice.label, () => actions.onInverseStyle(choice.value)),
+  }));
+  const legends = LEGENDS.map((legend) => {
+    const button = chip(legend.label, () => actions.onLegend(legend));
+    button.title = legend.scene;
+    return { legend, button };
+  });
+
   const kick = h('button', { type: 'button', class: 'kick' }, '蹴る');
   kick.addEventListener('click', actions.onKick);
   const status = h('p', { class: 'status' });
@@ -157,6 +186,19 @@ export function createPanel(
       ...keepers.map((k) => k.button),
     ),
     h('div', { class: 'group action' }, kick, status),
+    h(
+      'div',
+      { class: 'group row' },
+      h('span', { class: 'caption wide' }, '逆算（狙う点から蹴り方を求める）'),
+      inverse,
+      ...styles.map((s) => s.button),
+    ),
+    h(
+      'div',
+      { class: 'group row' },
+      h('span', { class: 'caption wide' }, '伝説の FK（パラメータは推定値）'),
+      ...legends.map((l) => l.button),
+    ),
     h('div', { class: 'group row' }, h('span', { class: 'caption' }, '表示'), arrows, previewLine),
     h('div', { class: 'group row' }, h('span', { class: 'caption' }, '比較'), pin, clearPins),
   );
@@ -174,6 +216,9 @@ export function createPanel(
     wallJump.setAttribute('aria-pressed', String(setup.wall.jump));
     for (const { choice, button } of keepers) {
       button.setAttribute('aria-pressed', String(choice.value === setup.keeper));
+    }
+    for (const { legend, button } of legends) {
+      button.setAttribute('aria-pressed', String(JSON.stringify(legend.setup) === JSON.stringify(setup)));
     }
     for (const { preset, button } of presets) {
       const active = (Object.keys(preset.patch) as Array<keyof typeof preset.patch>).every(
@@ -197,6 +242,12 @@ export function createPanel(
       previewLine.setAttribute('aria-pressed', String(view.preview));
       pin.disabled = !view.canPin;
       clearPins.disabled = view.pinCount === 0;
+    },
+    setInverse(state) {
+      inverse.setAttribute('aria-pressed', String(state.active));
+      for (const { choice, button } of styles) {
+        button.setAttribute('aria-pressed', String(choice.value === state.style));
+      }
     },
   };
 }

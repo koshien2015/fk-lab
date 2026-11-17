@@ -105,7 +105,7 @@ html, body {
 .group.row, .group.presets { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
 .group.row span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .caption { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
-.presets .caption { width: 100%; }
+.presets .caption, .caption.wide { width: 100%; }
 .contact { align-items: center; }
 .contact .caption { align-self: flex-start; }
 .contact-picker { width: 168px; height: 168px; touch-action: none; cursor: crosshair; }

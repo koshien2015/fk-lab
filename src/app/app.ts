@@ -15,16 +15,19 @@ import { kickerView, overviewView } from '../scene/cameraViews.ts';
 import { createForceArrows } from '../scene/forceArrows.ts';
 import { createGoal } from '../scene/goal.ts';
 import { createPitch } from '../scene/pitch.ts';
+import { createSearchLines } from '../scene/searchLines.ts';
 import { createStage } from '../scene/stage.ts';
 import { createTrail } from '../scene/trail.ts';
 import { h } from '../ui/dom.ts';
 import { createPanel } from '../ui/panel.ts';
 import { createTimeline } from '../ui/timeline.ts';
 import { createWhyPanel } from '../ui/whyPanel.ts';
+import type { GoalTarget, SpinStyle } from '../solver/inverse.ts';
 import { createSimClient } from '../worker/simClient.ts';
 import { createCompare } from './compare.ts';
 import { advance, seek, setRate, startFlight, togglePlay, type Flight } from './flight.ts';
 import { createHud } from './hud.ts';
+import { createInverseMode } from './inverseMode.ts';
 import { createPlacement } from './placement.ts';
 import { createPreviewer } from './previewer.ts';
 import { DEFAULT_SETUP, toKickInput, toKickState, toScenario, type KickSetup } from './setup.ts';
@@ -39,6 +42,7 @@ interface Shot {
 
 const AIM_HINT = '蹴る点・向き・強さを決めて「蹴る」。視点はドラッグで回せます。';
 const PLACE_HINT = 'ピッチをクリックまたはドラッグして、ボールを置く位置を選びます。';
+const INVERSE_HINT = 'ゴールの中の狙いたい点をクリックすると、そこに入る蹴り方を探します。';
 const FLIGHT_HINT = '下のバーでスロー再生や巻き戻しができます。設定を変えると構え直します。';
 
 /** 記録点 index での GK の姿勢 */
@@ -73,6 +77,9 @@ export function startApp(root: HTMLElement): void {
   const why = createWhyPanel(params);
   const banner = h('div', { class: 'overlay banner' });
   const placement = createPlacement(stage, (spot) => store.set({ spot }));
+  const searchLines = createSearchLines();
+  const inverse = createInverseMode(stage, (target) => void solve(target));
+  let inverseStyle: SpinStyle = 'curve';
 
   let flight: Flight<Shot> | null = null;
   let view = { arrows: true, preview: true };
@@ -99,6 +106,8 @@ export function startApp(root: HTMLElement): void {
     placement.marker,
     actors.object,
     compare.object,
+    searchLines.object,
+    inverse.marker,
   );
   const title = h('div', { class: 'overlay title' }, 'FK Lab');
   title.append(
@@ -137,7 +146,40 @@ export function startApp(root: HTMLElement): void {
     hud.update(sampleTrajectory(trajectory, 0));
   });
 
+  const setInverse = (active: boolean): void => {
+    if (active && placement.isActive()) setPlacing(false);
+    inverse.setActive(active);
+    if (!active) inverse.showTarget(null);
+    panel.setInverse({ active, style: inverseStyle });
+    panel.setStatus(active ? INVERSE_HINT : AIM_HINT);
+    if (active) showAim(store.get());
+  };
+
+  /** 逆算: 狙う点に入る蹴り方を Worker で探し、設定に反映する */
+  const solve = async (target: GoalTarget): Promise<void> => {
+    const setup = store.get();
+    inverse.showTarget(target);
+    panel.setStatus('蹴り方を探しています…');
+    try {
+      const solution = await sim.solve({ setup, target, style: inverseStyle }, params);
+      if (setup !== store.get()) return;
+      searchLines.play(solution.candidates);
+      store.set(solution.patch);
+      const found = solution.miss < 0.3;
+      const wall = solution.clearsWall ? '' : '壁を避けきれていません。';
+      panel.setStatus(
+        found
+          ? `${solution.evaluations} 通りを試して、狙った点から ${(solution.miss * 100).toFixed(0)} cm の蹴り方を見つけました。${wall}`
+          : `この球種では届く蹴り方が見つかりませんでした（いちばん近い蹴り方を表示）。${wall}`,
+      );
+    } catch (error) {
+      console.error('逆算に失敗しました', error);
+      panel.setStatus('逆算に失敗しました。もう一度試してください。');
+    }
+  };
+
   const setPlacing = (placing: boolean): void => {
+    if (placing && inverse.isActive()) setInverse(false);
     placement.setActive(placing);
     panel.setPlacing(placing);
     panel.setStatus(placing ? PLACE_HINT : AIM_HINT);
@@ -186,6 +228,17 @@ export function startApp(root: HTMLElement): void {
       compare.clear();
       syncView();
     },
+    onToggleInverse: () => setInverse(!inverse.isActive()),
+    onInverseStyle: (style) => {
+      inverseStyle = style;
+      panel.setInverse({ active: inverse.isActive(), style });
+    },
+    onLegend: (legend) => {
+      if (placement.isActive()) setPlacing(false);
+      if (inverse.isActive()) setInverse(false);
+      store.set(legend.setup);
+      panel.setStatus(`${legend.scene}。パラメータは推定値で、実際の記録ではありません。`);
+    },
   });
   root.append(panel.element);
 
@@ -193,7 +246,8 @@ export function startApp(root: HTMLElement): void {
     showAim(setup);
     previewer.request(setup);
     if (setup.spot !== previous.spot && !placement.isActive()) stage.setView(kickerView(setup.spot));
-    if (!placement.isActive()) panel.setStatus(AIM_HINT);
+    if (inverse.isActive()) panel.setStatus(INVERSE_HINT);
+    else if (!placement.isActive()) panel.setStatus(AIM_HINT);
   });
 
   /** 再生中の 1 コマを画面に反映する */
@@ -217,6 +271,7 @@ export function startApp(root: HTMLElement): void {
   };
 
   stage.onFrame((dt) => {
+    searchLines.update(dt);
     if (!flight) return;
     flight = advance(flight, dt);
     renderFlight(flight);
@@ -226,4 +281,5 @@ export function startApp(root: HTMLElement): void {
   previewer.request(store.get());
   stage.setView(kickerView(store.get().spot));
   panel.setStatus(AIM_HINT);
+  panel.setInverse({ active: false, style: inverseStyle });
 }
