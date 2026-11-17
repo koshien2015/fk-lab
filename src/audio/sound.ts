@@ -6,6 +6,14 @@ export interface SoundKit {
   unlock(): void;
   setMuted(muted: boolean): void;
   isMuted(): boolean;
+  /**
+   * 再生中かどうかを伝える。再生中だけ観客のざわめきを出し、
+   * 再生が終わってしばらくしたら、音の出力そのものを止める。
+   */
+  setActive(active: boolean): void;
+  /** いま目標にしている、ざわめきの音量と全体の音量（確認用） */
+  ambientLevel(): number;
+  masterLevel(): number;
   /** 強さ 0〜1 */
   kick(power: number): void;
   /** 以下の speed はぶつかった速さ [m/s] */
@@ -27,6 +35,9 @@ interface Envelope {
 }
 
 const AMBIENT_LEVEL = 0.035;
+const MASTER_LEVEL = 0.8;
+/** 再生が終わってから、音の出力を止めるまでの時間 [ms]（歓声の余韻が消えるのを待つ） */
+const IDLE_SUSPEND_MS = 6000;
 /** ポストの「カーン」を作る倍音（周波数 [Hz] と相対的な大きさ） */
 const POST_PARTIALS: ReadonlyArray<readonly [number, number]> = [
   [523, 1],
@@ -42,6 +53,18 @@ export function createSoundKit(): SoundKit {
   let master: GainNode | null = null;
   let noise: AudioBuffer | null = null;
   let muted = false;
+  /** ざわめきの音量を決めるノードと、いまの目標の音量 */
+  let ambient: GainNode | null = null;
+  let ambientTarget = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 鳴らし終わった音源のつなぎを外す（外さないと、鳴らすたびにノードが残る） */
+  const release = (source: AudioScheduledSourceNode, ...chain: AudioNode[]): void => {
+    source.onended = () => {
+      source.disconnect();
+      for (const node of chain) node.disconnect();
+    };
+  };
 
   const shape = (gain: AudioParam, at: number, env: Envelope): number => {
     const end = at + env.attack + (env.hold ?? 0) + env.release;
@@ -62,6 +85,7 @@ export function createSoundKit(): SoundKit {
     osc.frequency.exponentialRampToValueAtTime(to, ctx.currentTime + env.attack + env.release);
     const end = shape(gain.gain, ctx.currentTime, env);
     osc.connect(gain).connect(master);
+    release(osc, gain);
     osc.start();
     osc.stop(end + 0.02);
   };
@@ -81,12 +105,13 @@ export function createSoundKit(): SoundKit {
     const gain = ctx.createGain();
     shape(gain.gain, ctx.currentTime, env);
     source.connect(filter).connect(gain).connect(master);
+    release(source, filter, gain);
     source.start(ctx.currentTime, Math.random() * 1.5);
     source.stop(end + 0.02);
   };
 
-  /** 観客のざわめきを流し続ける */
-  const startAmbient = (context: AudioContext, out: GainNode, buffer: AudioBuffer): void => {
+  /** 観客のざわめきの音源を用意する。音量はゼロから始め、再生中だけ上げる。 */
+  const startAmbient = (context: AudioContext, out: GainNode, buffer: AudioBuffer): GainNode => {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
@@ -95,9 +120,10 @@ export function createSoundKit(): SoundKit {
     filter.frequency.value = 420;
     filter.Q.value = 0.4;
     const gain = context.createGain();
-    gain.gain.value = AMBIENT_LEVEL;
+    gain.gain.value = 0;
     source.connect(filter).connect(gain).connect(out);
     source.start();
+    return gain;
   };
 
   return {
@@ -113,18 +139,37 @@ export function createSoundKit(): SoundKit {
         return;
       }
       master = ctx.createGain();
-      master.gain.value = muted ? 0 : 0.8;
+      master.gain.value = muted ? 0 : MASTER_LEVEL;
       master.connect(ctx.destination);
       noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
       const data = noise.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-      startAmbient(ctx, master, noise);
+      ambient = startAmbient(ctx, master, noise);
     },
     setMuted(next) {
       muted = next;
-      if (ctx && master) master.gain.setTargetAtTime(next ? 0 : 0.8, ctx.currentTime, 0.03);
+      if (ctx && master) master.gain.setTargetAtTime(next ? 0 : MASTER_LEVEL, ctx.currentTime, 0.03);
     },
     isMuted: () => muted,
+    setActive(active) {
+      ambientTarget = active ? AMBIENT_LEVEL : 0;
+      if (!ctx || !ambient) return;
+      if (idleTimer !== null) clearTimeout(idleTimer);
+      idleTimer = null;
+      ambient.gain.setTargetAtTime(ambientTarget, ctx.currentTime, active ? 0.2 : 0.35);
+      if (active) {
+        void ctx.resume();
+        return;
+      }
+      // 余韻が消えたら出力を止める。止めないと、ざわめきの音源が裏で回り続ける。
+      const context = ctx;
+      idleTimer = setTimeout(() => {
+        idleTimer = null;
+        void context.suspend();
+      }, IDLE_SUSPEND_MS);
+    },
+    ambientLevel: () => ambientTarget,
+    masterLevel: () => (muted ? 0 : MASTER_LEVEL),
     kick(power) {
       const level = 0.5 + 0.5 * power;
       tone(170, 46, { attack: 0.004, peak: 0.9 * level, release: 0.16 });

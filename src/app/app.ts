@@ -104,6 +104,8 @@ export function startApp(root: HTMLElement): void {
   /** 逆算とキックの通し番号。あとから出した依頼の結果だけを使う。 */
   let solveSeq = 0;
   let kickSeq = 0;
+  /** 前のフレームで再生中だったか（音の入り切りに使う） */
+  let wasPlaying = false;
   /** 解説パネルを出し終えたキック（同じキックで何度も開き直さない） */
   let explained: Shot | null = null;
 
@@ -343,6 +345,12 @@ export function startApp(root: HTMLElement): void {
   stage.onFrame((dt) => {
     searchLines.update(dt);
     confetti.update(dt);
+    // 再生中だけ、観客のざわめきを出す。止まったら消す。
+    const playing = flight?.playing ?? false;
+    if (playing !== wasPlaying) {
+      wasPlaying = playing;
+      sound.setActive(playing);
+    }
     if (!flight) {
       if (!placement.isActive()) rig.update(dt, restingBall(), false);
       return;
