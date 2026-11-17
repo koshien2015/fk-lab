@@ -80,11 +80,12 @@ describe('コーナーから直接ゴールを狙う', () => {
     expect(simulateShot(toKickState(solved, p), p, toScenario(solved)).outcome).toBe('save');
   });
   it('GK に当たった球は前へ弾かれ、ゴールへ押し込まれない', () => {
+    // 逆算は重いので 1 回だけ行い、GK の読み違い（シード）だけを変えて蹴る
+    const aimed = corner(1, { keeper: 'hard' });
+    const solution = solveKick({ setup: aimed, target: { y: 1.5, z: -1 }, style: 'curve' }, p);
     let touched = 0;
     for (let seed = 1; seed <= 3; seed++) {
-      const aimed = corner(1, { keeper: 'hard', seed });
-      const solution = solveKick({ setup: aimed, target: { y: 1.5, z: -1 }, style: 'curve' }, p);
-      const setup = { ...aimed, ...solution.patch };
+      const setup = { ...aimed, ...solution.patch, seed };
       const r = simulateShot(toKickState(setup, p), p, toScenario(setup));
       const hit = r.events.find((e) => e.kind === 'keeper');
       if (!hit) continue;

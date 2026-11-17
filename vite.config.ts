@@ -14,6 +14,8 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
+    // 逆算のテストは 1 件で数百回シミュレーションする。CI のマシンは手元の 4〜5 倍遅いので、余裕を持たせる。
+    testTimeout: 30_000,
     coverage: {
       // 計算の部分（DOM や WebGL を使わないもの）を対象にする
       include: [
