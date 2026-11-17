@@ -17,7 +17,7 @@ import { createCameraRig } from '../scene/cameraRig.ts';
 import { overviewView, type BallMotion } from '../scene/cameraViews.ts';
 import { createForceArrows } from '../scene/forceArrows.ts';
 import { createGoal } from '../scene/goal.ts';
-import { createNet } from '../scene/net.ts';
+import { createNet, type NetView } from '../scene/net.ts';
 import { createConfetti } from '../scene/particles.ts';
 import { createPitch } from '../scene/pitch.ts';
 import { createSearchLines } from '../scene/searchLines.ts';
@@ -85,10 +85,11 @@ export function startApp(root: HTMLElement): void {
   const hud = createHud(params);
   const why = createWhyPanel(params);
   const banner = createBanner();
-  const net = createNet();
+  /** ネットの形は Worker で作る（たるんだ状態を計算する）ので、届いてから表示する */
+  let net: NetView | null = null;
   const confetti = createConfetti();
   const sound = createSoundKit();
-  const effects = createEffects({ sound, net, confetti, flash: banner.flash });
+  const effects = createEffects({ sound, confetti, flash: banner.flash });
   const rig = createCameraRig(stage);
   const placement = createPlacement(stage, (spot) => store.set({ spot }));
   const searchLines = createSearchLines();
@@ -127,7 +128,6 @@ export function startApp(root: HTMLElement): void {
     createStadium(),
     createPitch(),
     createGoal(),
-    net.object,
     confetti.object,
     ball.mesh,
     trail.object,
@@ -172,6 +172,7 @@ export function startApp(root: HTMLElement): void {
     actors.setKeeper(
       setup.keeper === 'none' ? null : { z: keeperStartZ(setup.spot, players.length > 0), lean: 0 },
     );
+    net?.showRest();
     banner.setVisible(false);
     why.hide();
     timeline.setVisible(false);
@@ -305,6 +306,7 @@ export function startApp(root: HTMLElement): void {
     arrows.update(sample);
     actors.setKeeper(keeperPoseAt(result, sample.index));
     actors.setWallLift(jumpHeight(current.time, setup.wall));
+    net?.showMotion(result.net, current.time);
     timeline.render(current);
 
     const decided = current.time >= verdictTime(result);
@@ -323,7 +325,6 @@ export function startApp(root: HTMLElement): void {
 
   stage.onFrame((dt) => {
     searchLines.update(dt);
-    net.update(dt);
     confetti.update(dt);
     if (!flight) {
       if (!placement.isActive()) rig.update(dt, restingBall(), false);
@@ -340,6 +341,14 @@ export function startApp(root: HTMLElement): void {
     const goal = result.events.find((event) => event.kind === 'goal');
     rig.update(dt, sample, goal !== undefined && flight.time >= goal.t - 0.25);
   });
+
+  sim
+    .netShape()
+    .then((shape) => {
+      net = createNet(shape);
+      stage.scene.add(net.object);
+    })
+    .catch((error: unknown) => console.error('ネットの準備に失敗しました', error));
 
   showAim(store.get());
   previewer.request(store.get());

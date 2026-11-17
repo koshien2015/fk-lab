@@ -8,7 +8,7 @@ import { integrate, type StepControl } from '../physics/simulate.ts';
 import type { KickState, SimOptions, Trajectory, Vec3 } from '../physics/types.ts';
 import { applyContact, REST_SPEED, type Surface } from './contact.ts';
 import { sphereCapsuleContact, type Capsule } from './geometry.ts';
-import { FRAME_CAPSULES, isInsideGoal, netContact } from './goalFrame.ts';
+import { FRAME_CAPSULES, isInsideGoal } from './goalFrame.ts';
 import {
   createKeeper,
   KEEPER,
@@ -18,6 +18,7 @@ import {
   type KeeperConfig,
   type KeeperLevel,
 } from './keeper.ts';
+import { createNetSim, getNetModel, NET } from './netCloth.ts';
 import { jumpHeight, wallCapsule, wallPlayers, type WallPlayer, type WallSetup } from './wall.ts';
 
 export type ShotOutcome = 'goal' | 'save' | 'post' | 'out' | 'wall';
@@ -45,6 +46,8 @@ export interface ShotResult {
   /** 最初に何かに当たる（またはゴールラインを越える）までの時間 [s] */
   readonly flightTime: number;
   readonly wallPlayers: readonly WallPlayer[];
+  /** ネットの動き。ボールがゴールに近づかなかったキックでは null。 */
+  readonly net: NetMotion | null;
   /** GK の動き。軌道の記録点と同じ並び。 */
   readonly keeper: {
     readonly config: KeeperConfig | null;
@@ -53,17 +56,29 @@ export interface ShotResult {
   };
 }
 
+/** ネットの節点の位置を、一定の間隔で記録したもの */
+export interface NetMotion {
+  /** 記録を始めた時刻と、記録の間隔 [s] */
+  readonly startTime: number;
+  readonly frameDt: number;
+  readonly nodeCount: number;
+  /** 1 コマあたり nodeCount × 3 要素（x, y, z の並び） */
+  readonly frames: Float32Array;
+}
+
+/** ネットを何ステップごとに記録するか（網の刻み 2 ms で 約 60 コマ/秒） */
+const NET_FRAME_STEPS = 8;
+/** ネットに触れていない時間がこれだけ続いたら、次の接触を新しい出来事として数える [s] */
+const NET_CONTACT_GAP = 0.3;
 /** 同じ種類の出来事を続けて記録しない間隔 [s] */
 const EVENT_GAP = 0.08;
 /** これより遅い接触は出来事として記録しない [m/s] */
 const EVENT_SPEED = 0.8;
 /** ゴール後・アウト後に、ボールの行方を見せておく時間 [s] */
-const AFTER_GOAL = 1.6;
+const AFTER_GOAL = 2.0;
 const AFTER_OUT = 0.7;
 /** 止まったとみなす速さ [m/s] */
 const STOPPED_SPEED = 0.25;
-/** ネットに触れている間、1 ステップごとに勢いを削る割合 */
-const NET_DAMPING = 0.92;
 const MAX_TIME = 8;
 
 function isOutOfPlay(c: Vec3, radius: number): boolean {
@@ -80,6 +95,14 @@ function judge(events: readonly ShotEvent[]): ShotOutcome {
   return has('out') ? 'out' : 'save';
 }
 
+/** 記録したコマを 1 本の配列にまとめる */
+function packNet(startTime: number, frameDt: number, frames: readonly Float32Array[]): NetMotion {
+  const size = frames[0]?.length ?? 0;
+  const packed = new Float32Array(size * frames.length);
+  frames.forEach((frame, i) => packed.set(frame, i * size));
+  return { startTime, frameDt, nodeCount: size / 3, frames: packed };
+}
+
 export function simulateShot(
   kick: KickState,
   params: PhysicsParams,
@@ -90,7 +113,6 @@ export function simulateShot(
   const ground: Surface = { restitution: params.groundRestitution, friction: params.groundFriction };
   const frame: Surface = { restitution: params.postRestitution, friction: params.postFriction };
   const body: Surface = { restitution: params.bodyRestitution, friction: params.bodyFriction };
-  const net: Surface = { restitution: params.netRestitution, friction: 0 };
 
   const players = wallPlayers(scenario.spot, scenario.wall);
   const config = scenario.keeper === 'none' ? null : KEEPER_LEVELS[scenario.keeper];
@@ -144,12 +166,31 @@ export function simulateShot(
     y[8] *= keep;
   };
 
+  // ネットは、ボールがゴールに近づいてから計算を始める（近づかないキックでは計算しない）
+  let netSim: ReturnType<typeof createNetSim> | null = null;
+  let netStart = 0;
+  let netSteps = 0;
+  let netClock = 0;
+  let netTouchedAt = -Infinity;
+  const netFrames: Float32Array[] = [];
+
   const hitNet = (y: Float64Array, time: number): void => {
-    const contact = netContact([y[0], y[1], y[2]], R);
-    if (!contact) return;
-    const impact = applyContact(y, contact, net, params);
-    if (impact > EVENT_SPEED) note('net', time, y, impact);
-    for (let i = 3; i < 9; i++) y[i] *= NET_DAMPING;
+    if (!netSim) {
+      const close = y[0] > -1.5 && Math.abs(y[2]) < FIELD.goalWidth / 2 + 2 && y[1] < FIELD.goalHeight + 1.5;
+      if (!close) return;
+      netSim = createNetSim(getNetModel(), params);
+      netStart = time;
+    }
+    // 網はボールより粗い刻みで進める
+    netClock += dt;
+    if (netClock < NET.dt - 1e-9) return;
+    netClock = 0;
+    if (netSteps % NET_FRAME_STEPS === 0) netFrames.push(Float32Array.from(netSim.positions));
+    netSteps++;
+    const speed = Math.hypot(y[3], y[4], y[5]);
+    if (netSim.step(NET.dt, y) <= 0) return;
+    if (time - netTouchedAt > NET_CONTACT_GAP && speed > EVENT_SPEED) note('net', time, y, speed);
+    netTouchedAt = time;
   };
 
   const afterStep = (y: Float64Array, time: number, control: StepControl): boolean => {
@@ -158,7 +199,7 @@ export function simulateShot(
 
     hitGround(y, time);
     if (y[0] > -1) hitCapsules(y, time, FRAME_CAPSULES, frame, 'post');
-    if (y[0] > -R) hitNet(y, time);
+    hitNet(y, time);
     if (players.length > 0) {
       const lift = jumpHeight(time, scenario.wall);
       hitCapsules(y, time, players.map((player) => wallCapsule(player, lift)), body, 'wall');
@@ -199,6 +240,7 @@ export function simulateShot(
     outcome: judge(events),
     events,
     flightTime: events[0]?.t ?? trajectory.final.t,
+    net: netSim ? packNet(netStart, NET.dt * NET_FRAME_STEPS, netFrames) : null,
     wallPlayers: players,
     keeper: { config, z: Float64Array.from(keeperZ), lean: Float64Array.from(keeperLean) },
   };

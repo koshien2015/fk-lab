@@ -14,6 +14,8 @@ export interface SimClient {
   shot(kick: KickState, params: PhysicsParams, scenario: ShotScenario): Promise<ShotResult>;
   /** 逆算: 狙った点に入る蹴り方を探す */
   solve(request: InverseRequest, params: PhysicsParams): Promise<InverseSolution>;
+  /** ネットの形（落ち着いた状態の節点と、糸のつながり） */
+  netShape(): Promise<{ rest: Float32Array; springs: Uint16Array }>;
 }
 
 interface Pending {
@@ -67,6 +69,11 @@ export function createSimClient(): SimClient {
       const response = await call({ type: 'solve', params, request });
       if (response.type !== 'solved') throw new Error('Worker から想定外の応答が返りました');
       return response.solution;
+    },
+    async netShape() {
+      const response = await call({ type: 'net' });
+      if (response.type !== 'net') throw new Error('Worker から想定外の応答が返りました');
+      return { rest: response.rest, springs: response.springs };
     },
   };
 }

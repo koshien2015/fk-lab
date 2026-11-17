@@ -1,11 +1,10 @@
 /**
  * 演出の進行役。再生が出来事（バウンド、ポスト、ネット、ゴールなど）をまたいだときに、
- * 音・ネットの揺れ・紙吹雪・画面の光を出す。
+ * 音・紙吹雪・画面の光を出す。ネットの動きは物理計算の結果なので、ここでは扱わない。
  */
 import type { SoundKit } from '../audio/sound.ts';
 import { crossedEvents } from '../fx/direction.ts';
 import type { ShotEvent, ShotResult } from '../match/shot.ts';
-import type { NetView } from '../scene/net.ts';
 import type { Confetti } from '../scene/particles.ts';
 
 export interface Effects {
@@ -17,13 +16,12 @@ export interface Effects {
 
 export interface EffectParts {
   readonly sound: SoundKit;
-  readonly net: NetView;
   readonly confetti: Confetti;
   /** 画面を一瞬光らせる */
   readonly flash: () => void;
 }
 
-export function createEffects({ sound, net, confetti, flash }: EffectParts): Effects {
+export function createEffects({ sound, confetti, flash }: EffectParts): Effects {
   const react = (event: ShotEvent, result: ShotResult): void => {
     switch (event.kind) {
       case 'ground':
@@ -40,7 +38,6 @@ export function createEffects({ sound, net, confetti, flash }: EffectParts): Eff
         break;
       case 'net':
         sound.net(event.speed);
-        net.poke(event.position, event.speed);
         break;
       case 'goal':
         sound.cheer();

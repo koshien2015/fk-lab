@@ -2,6 +2,7 @@
 /**
  * 物理計算を担当する Web Worker。メインスレッド（描画）を止めないために分けている。
  */
+import { getNetModel } from '../match/netCloth.ts';
 import { simulateShot } from '../match/shot.ts';
 import { simulate } from '../physics/simulate.ts';
 import type { Trajectory } from '../physics/types.ts';
@@ -21,6 +22,14 @@ function handle(request: SimRequest): { response: SimResponse; transfer: ArrayBu
     const trajectory = simulate(request.kick, request.params, request.options);
     return { response: { id: request.id, type: 'trajectory', trajectory }, transfer: buffersOf(trajectory) };
   }
+  if (request.type === 'net') {
+    // 使い回す値なので、コピーを渡す（渡したバッファは Worker 側で使えなくなるため）
+    const model = getNetModel();
+    return {
+      response: { id: request.id, type: 'net', rest: model.rest.slice(), springs: model.springs.slice() },
+      transfer: [],
+    };
+  }
   if (request.type === 'solve') {
     const solution = solveKick(request.request, request.params);
     const transfer = solution.candidates.map((path) => path.buffer as ArrayBuffer);
@@ -31,6 +40,7 @@ function handle(request: SimRequest): { response: SimResponse; transfer: ArrayBu
     ...buffersOf(result.trajectory),
     result.keeper.z.buffer as ArrayBuffer,
     result.keeper.lean.buffer as ArrayBuffer,
+    ...(result.net ? [result.net.frames.buffer as ArrayBuffer] : []),
   ];
   return { response: { id: request.id, type: 'shot', result }, transfer };
 }

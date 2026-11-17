@@ -122,10 +122,6 @@ export const PARAM_DEFS = {
     value: 0.4, unit: '', label: '選手の体の摩擦係数', assumed: true,
     note: '', min: 0, max: 1,
   },
-  netRestitution: {
-    value: 0.05, unit: '', label: 'ネットの反発係数', assumed: true,
-    note: 'ネットはボールの勢いをほぼ吸収する', min: 0, max: 0.3,
-  },
 } as const satisfies Record<string, ParamDef>;
 
 export type ParamKey = keyof typeof PARAM_DEFS;

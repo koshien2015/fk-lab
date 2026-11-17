@@ -18,6 +18,8 @@ export type SimRequest =
   | (Base & { readonly type: 'simulate' })
   /** 衝突と判定を含む 1 本のキック */
   | (Base & { readonly type: 'shot'; readonly scenario: ShotScenario })
+  /** ネットの形（落ち着いた状態の節点と、糸のつながり） */
+  | { readonly id: number; readonly type: 'net' }
   /** 逆算（狙った点に入る蹴り方を探す） */
   | {
       readonly id: number;
@@ -30,4 +32,5 @@ export type SimResponse =
   | { readonly id: number; readonly type: 'trajectory'; readonly trajectory: Trajectory }
   | { readonly id: number; readonly type: 'shot'; readonly result: ShotResult }
   | { readonly id: number; readonly type: 'solved'; readonly solution: InverseSolution }
+  | { readonly id: number; readonly type: 'net'; readonly rest: Float32Array; readonly springs: Uint16Array }
   | { readonly id: number; readonly type: 'error'; readonly message: string };

@@ -87,9 +87,19 @@ describe('判定', () => {
     expect(kinds(r)).toContain('net');
     const [x, y, z] = r.trajectory.final.position;
     expect(x).toBeGreaterThan(0);
-    expect(x).toBeLessThan(FIELD.goalDepthBottom + R + 0.05);
-    expect(Math.abs(z)).toBeLessThan(FIELD.goalWidth / 2 + 0.2);
-    expect(y).toBeLessThan(FIELD.goalHeight + 0.2);
+    // ネットはたるんでいるので、張った位置より少し奥まで押し込まれる
+    expect(x).toBeLessThan(FIELD.goalDepthBottom + 0.9);
+    expect(Math.abs(z)).toBeLessThan(FIELD.goalWidth / 2 + 0.6);
+    expect(y).toBeLessThan(FIELD.goalHeight + 0.3);
+    expect(Math.hypot(...r.trajectory.final.velocity)).toBeLessThan(3);
+    // ネットの動きが、節点 × 3 要素のコマとして記録されている
+    expect(r.net).not.toBeNull();
+    expect(r.net!.frames.length % (r.net!.nodeCount * 3)).toBe(0);
+    expect(r.net!.frames.length / (r.net!.nodeCount * 3)).toBeGreaterThan(30);
+  });
+  it('ゴールから遠い所で終わるキックでは、ネットを計算しない', () => {
+    const r = simulateShot(aimAt({ x: -40, z: 0 }, { y: 0.5, z: 0 }, 8), p, scenario({ spot: { x: -40, z: 0 } }));
+    expect(r.net).toBeNull();
   });
   it('枠の外へ蹴ると枠外', () => {
     const wide = simulateShot(aimAt({ x: -20, z: 0 }, { y: 1, z: 6 }, 28), p, scenario());
@@ -133,6 +143,7 @@ describe('判定', () => {
     expect(Array.from(a.trajectory.pos)).toEqual(Array.from(b.trajectory.pos));
     expect(Array.from(a.keeper.z)).toEqual(Array.from(b.keeper.z));
     expect(a.events).toEqual(b.events);
+    expect(Array.from(a.net?.frames ?? [])).toEqual(Array.from(b.net?.frames ?? []));
   });
 });
 
