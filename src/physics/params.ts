@@ -94,6 +94,38 @@ export const PARAM_DEFS = {
     value: 0.3, unit: '', label: '回転の伝達係数 κ', assumed: true,
     note: 'ω₀ = κ·(r × J)/I（足との摩擦）', min: 0, max: 1,
   },
+  groundRestitution: {
+    value: 0.6, unit: '', label: '地面の反発係数', assumed: true,
+    note: '芝でのバウンド', min: 0.3, max: 0.8,
+  },
+  groundFriction: {
+    value: 0.5, unit: '', label: '地面の摩擦係数', assumed: true,
+    note: 'バウンド時に滑りを止める摩擦', min: 0.1, max: 1,
+  },
+  rollingResistance: {
+    value: 0.1, unit: '', label: '転がり抵抗係数', assumed: true,
+    note: '転がるボールの減速 = 係数 × g', min: 0.02, max: 0.3,
+  },
+  postRestitution: {
+    value: 0.65, unit: '', label: 'ポストの反発係数', assumed: true,
+    note: 'ポストとクロスバー', min: 0.3, max: 0.9,
+  },
+  postFriction: {
+    value: 0.25, unit: '', label: 'ポストの摩擦係数', assumed: true,
+    note: '', min: 0, max: 1,
+  },
+  bodyRestitution: {
+    value: 0.3, unit: '', label: '選手の体の反発係数', assumed: true,
+    note: '壁の選手と GK', min: 0.1, max: 0.6,
+  },
+  bodyFriction: {
+    value: 0.4, unit: '', label: '選手の体の摩擦係数', assumed: true,
+    note: '', min: 0, max: 1,
+  },
+  netRestitution: {
+    value: 0.05, unit: '', label: 'ネットの反発係数', assumed: true,
+    note: 'ネットはボールの勢いをほぼ吸収する', min: 0, max: 0.3,
+  },
 } as const satisfies Record<string, ParamDef>;
 
 export type ParamKey = keyof typeof PARAM_DEFS;

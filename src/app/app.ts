@@ -1,9 +1,13 @@
 /**
  * アプリ本体。場面を組み立て、設定 → 予測線 → 蹴る → 再生 の流れをつなぐ。
  */
+import { keeperStartZ, type KeeperPose } from '../match/keeper.ts';
+import type { ShotResult } from '../match/shot.ts';
+import { OUTCOME_LABELS, verdictTime } from '../match/verdict.ts';
+import { jumpHeight, wallPlayers } from '../match/wall.ts';
 import { defaultParams } from '../physics/params.ts';
-import type { Trajectory } from '../physics/types.ts';
 import { sampleTrajectory } from '../playback/sample.ts';
+import { createActors } from '../scene/actors.ts';
 import { createBall } from '../scene/ball.ts';
 import { kickerView, overviewView } from '../scene/cameraViews.ts';
 import { createGoal } from '../scene/goal.ts';
@@ -16,13 +20,21 @@ import { createSimClient } from '../worker/simClient.ts';
 import { createHud } from './hud.ts';
 import { createPlacement } from './placement.ts';
 import { createPreviewer } from './previewer.ts';
-import { DEFAULT_SETUP, toKickState, type KickSetup } from './setup.ts';
+import { DEFAULT_SETUP, toKickState, toScenario, type KickSetup } from './setup.ts';
 import { createStore } from './store.ts';
 
-/** 再生中の軌道と、いまの再生時刻。null なら構えている最中。 */
+/** 再生中のキックと、いまの再生時刻。null なら構えている最中。 */
 interface Flight {
-  readonly trajectory: Trajectory;
+  readonly result: ShotResult;
+  readonly setup: KickSetup;
   readonly time: number;
+}
+
+/** 記録点 index での GK の姿勢 */
+function keeperPoseAt(result: ShotResult, index: number): KeeperPose | null {
+  if (!result.keeper.config) return null;
+  const i = Math.min(index, result.keeper.z.length - 1);
+  return { z: result.keeper.z[i], lean: result.keeper.lean[i] };
 }
 
 const AIM_HINT = '蹴る点・向き・強さを決めて「蹴る」。視点はドラッグで回せます。';
@@ -42,14 +54,24 @@ export function startApp(root: HTMLElement): void {
   const sim = createSimClient();
   let flight: Flight | null = null;
 
+  const actors = createActors();
+  const banner = h('div', { class: 'overlay banner' });
   const placement = createPlacement(stage, (spot) => store.set({ spot }));
-  stage.scene.add(createPitch(), createGoal(), ball.mesh, trail.object, preview.object, placement.marker);
+  stage.scene.add(
+    createPitch(),
+    createGoal(),
+    ball.mesh,
+    trail.object,
+    preview.object,
+    placement.marker,
+    actors.object,
+  );
 
   const title = h('div', { class: 'overlay title' }, 'FK Lab');
   title.append(
     h('small', {}, '空力係数は仮定値です（実測ではありません）。', h('a', { href: './graphs.html' }, '物理コアのグラフ')),
   );
-  viewport.append(title, hud.element);
+  viewport.append(title, hud.element, banner);
 
   /** 構えの姿に戻す（ボールを置き、予測線を出す） */
   const showAim = (setup: KickSetup): void => {
@@ -58,6 +80,13 @@ export function startApp(root: HTMLElement): void {
     preview.object.visible = true;
     ball.show({ position: [setup.spot.x, params.radius, setup.spot.z], quaternion: [0, 0, 0, 1] });
     placement.showAt(setup.spot);
+    const players = wallPlayers(setup.spot, setup.wall);
+    actors.setWall(players, setup.spot);
+    actors.setWallLift(0);
+    actors.setKeeper(
+      setup.keeper === 'none' ? null : { z: keeperStartZ(setup.spot, players.length > 0), lean: 0 },
+    );
+    banner.classList.remove('show');
   };
 
   const previewer = createPreviewer(sim, params, (trajectory, setup) => {
@@ -86,11 +115,13 @@ export function startApp(root: HTMLElement): void {
     const setup = store.get();
     showAim(setup);
     try {
-      const trajectory = await sim.simulate(toKickState(setup, params), params, { seed: setup.seed });
+      const result = await sim.shot(toKickState(setup, params), params, toScenario(setup));
       if (setup !== store.get()) return;
-      trail.setTrajectory(trajectory);
+      trail.setTrajectory(result.trajectory);
       preview.object.visible = false;
-      flight = { trajectory, time: 0 };
+      banner.textContent = OUTCOME_LABELS[result.outcome];
+      banner.dataset.outcome = result.outcome;
+      flight = { result, setup, time: 0 };
       panel.setStatus('設定を変えると、構え直します。');
     } catch (error) {
       console.error('キックの計算に失敗しました', error);
@@ -107,12 +138,16 @@ export function startApp(root: HTMLElement): void {
 
   stage.onFrame((dt) => {
     if (!flight) return;
-    const time = Math.min(flight.time + dt, flight.trajectory.final.t);
+    const { result, setup } = flight;
+    const time = Math.min(flight.time + dt, result.trajectory.final.t);
     flight = { ...flight, time };
-    const sample = sampleTrajectory(flight.trajectory, time);
+    const sample = sampleTrajectory(result.trajectory, time);
     ball.show(sample);
     trail.reveal(sample.index);
     hud.update(sample);
+    actors.setKeeper(keeperPoseAt(result, sample.index));
+    actors.setWallLift(jumpHeight(time, setup.wall));
+    banner.classList.toggle('show', time >= verdictTime(result));
   });
 
   showAim(store.get());

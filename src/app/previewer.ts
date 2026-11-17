@@ -22,7 +22,11 @@ export function createPreviewer(
   const run = async (setup: KickSetup): Promise<void> => {
     running = true;
     try {
-      const trajectory = await sim.simulate(toKickState(setup, params), params, { seed: setup.seed });
+      // 予測線は、何にも当たらない飛翔をゴールラインまで描く
+      const trajectory = await sim.simulate(toKickState(setup, params), params, {
+        seed: setup.seed,
+        stopAtX: params.radius,
+      });
       onResult(trajectory, setup);
     } catch (error) {
       console.error('予測線の計算に失敗しました', error);

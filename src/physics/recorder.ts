@@ -6,8 +6,8 @@ import type { ForceKey, Trajectory, Vec3 } from './types.ts';
 const FORCE_ORDER: readonly ForceKey[] = ['gravity', 'drag', 'magnus', 'knuckle'];
 
 export interface Recorder {
-  /** 状態 y とそのときの力 f を 1 点として記録する */
-  record(time: number, y: Float64Array, f: Float64Array): void;
+  /** 状態 y とそのときの力 f を 1 点として記録し、その番号を返す */
+  record(time: number, y: Float64Array, f: Float64Array): number;
   /** 力ごとの寄与を 1 ステップぶん積む（台形則） */
   accumulate(fPrev: Float64Array, fNow: Float64Array): void;
   finish(time: number, y: Float64Array): Trajectory;
@@ -53,6 +53,7 @@ export function createRecorder(capacity: number, dt: number, mass: number): Reco
       cd[count] = f[13];
       spin[count] = f[14];
       count++;
+      return count - 1;
     },
     accumulate(fPrev, fNow) {
       // 力が 1 ステップ内で直線的に変わるなら厳密

@@ -1,18 +1,24 @@
 /**
  * 物理計算の Worker を Promise で呼ぶための窓口。
  */
+import type { ShotResult, ShotScenario } from '../match/shot.ts';
 import type { PhysicsParams } from '../physics/params.ts';
 import type { KickState, SimOptions, Trajectory } from '../physics/types.ts';
 import type { SimRequest, SimResponse } from './protocol.ts';
 
 export interface SimClient {
+  /** 何にも当たらない飛翔だけを計算する */
   simulate(kick: KickState, params: PhysicsParams, options?: SimOptions): Promise<Trajectory>;
+  /** 衝突と判定を含めて 1 本のキックを計算する */
+  shot(kick: KickState, params: PhysicsParams, scenario: ShotScenario): Promise<ShotResult>;
 }
 
 interface Pending {
-  readonly resolve: (trajectory: Trajectory) => void;
+  readonly resolve: (response: SimResponse) => void;
   readonly reject: (error: Error) => void;
 }
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export function createSimClient(): SimClient {
   const worker = new Worker(new URL('./simWorker.ts', import.meta.url), { type: 'module' });
@@ -24,8 +30,11 @@ export function createSimClient(): SimClient {
     const entry = pending.get(response.id);
     if (!entry) return;
     pending.delete(response.id);
-    if (response.type === 'trajectory') entry.resolve(response.trajectory);
-    else entry.reject(new Error(`シミュレーションに失敗しました: ${response.message}`));
+    if (response.type === 'error') {
+      entry.reject(new Error(`シミュレーションに失敗しました: ${response.message}`));
+    } else {
+      entry.resolve(response);
+    }
   };
   worker.onerror = (event): void => {
     const error = new Error(`物理計算の Worker が止まりました: ${event.message}`);
@@ -33,14 +42,23 @@ export function createSimClient(): SimClient {
     pending.clear();
   };
 
+  const call = (request: DistributiveOmit<SimRequest, 'id'>): Promise<SimResponse> =>
+    new Promise<SimResponse>((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      worker.postMessage({ ...request, id });
+    });
+
   return {
-    simulate(kick, params, options = {}) {
-      return new Promise<Trajectory>((resolve, reject) => {
-        const id = nextId++;
-        pending.set(id, { resolve, reject });
-        const request: SimRequest = { id, type: 'simulate', kick, params, options };
-        worker.postMessage(request);
-      });
+    async simulate(kick, params, options = {}) {
+      const response = await call({ type: 'simulate', kick, params, options });
+      if (response.type !== 'trajectory') throw new Error('Worker から想定外の応答が返りました');
+      return response.trajectory;
+    },
+    async shot(kick, params, scenario) {
+      const response = await call({ type: 'shot', kick, params, options: {}, scenario });
+      if (response.type !== 'shot') throw new Error('Worker から想定外の応答が返りました');
+      return response.result;
     },
   };
 }

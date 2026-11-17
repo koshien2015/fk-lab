@@ -19,6 +19,8 @@ export interface SimOptions {
   readonly seed?: number;
   /** 地面（y = R）まで落ちたら止める */
   readonly stopAtGround?: boolean;
+  /** x がこの値に達したら止める（ゴールラインで止めたいときに使う） */
+  readonly stopAtX?: number;
 }
 
 export type ForceKey = 'gravity' | 'drag' | 'magnus' | 'knuckle';

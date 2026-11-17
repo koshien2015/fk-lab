@@ -2,6 +2,9 @@
  * 蹴り方の設定（ユーザーが決めるもの）と、お手本の設定。
  */
 import { aimAzimuthDeg, type Spot } from '../field/placement.ts';
+import type { KeeperLevel } from '../match/keeper.ts';
+import type { ShotScenario } from '../match/shot.ts';
+import type { WallSetup } from '../match/wall.ts';
 import { kickToState, type KickInput } from '../physics/kick.ts';
 import type { PhysicsParams } from '../physics/params.ts';
 import type { KickState } from '../physics/types.ts';
@@ -16,15 +19,24 @@ export interface KickSetup {
   readonly elevationDeg: number;
   /** 強さ 0〜1 */
   readonly power: number;
-  /** ナックルの揺れ方を決めるシード */
+  /** ナックルの揺れ方と、GK の読み違いを決めるシード */
   readonly seed: number;
+  readonly wall: WallSetup;
+  readonly keeper: KeeperLevel | 'none';
 }
 
 export const SETUP_LIMITS = {
   aimDeg: { min: -25, max: 25, step: 0.5 },
   elevationDeg: { min: 0, max: 40, step: 0.5 },
   power: { min: 0.3, max: 1, step: 0.01 },
+  wallCount: { min: 0, max: 5, step: 1 },
+  wallOffset: { min: -2, max: 2, step: 0.05 },
+  wallJumpDelay: { min: 0, max: 0.4, step: 0.01 },
 } as const;
+
+export function toScenario(setup: KickSetup): ShotScenario {
+  return { spot: setup.spot, wall: setup.wall, keeper: setup.keeper, seed: setup.seed };
+}
 
 export function toKickInput(setup: KickSetup): KickInput {
   return {
@@ -58,7 +70,7 @@ export const SETUP_PRESETS: readonly SetupPreset[] = [
     id: 'knuckle',
     label: 'ナックル',
     description: '中心を押し出す。無回転で揺れる',
-    patch: { contact: [0, 0], aimDeg: 0, elevationDeg: 13, power: 0.83 },
+    patch: { contact: [0, 0], aimDeg: 4, elevationDeg: 16, power: 0.76 },
   },
   {
     id: 'drive',
@@ -72,4 +84,6 @@ export const DEFAULT_SETUP: KickSetup = {
   spot: { x: -25, z: 0 },
   ...SETUP_PRESETS[0].patch,
   seed: 1,
+  wall: { count: 4, offset: 0, jump: false, jumpDelay: 0.15 },
+  keeper: 'normal',
 };

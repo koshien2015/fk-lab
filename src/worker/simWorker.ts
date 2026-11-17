@@ -2,6 +2,7 @@
 /**
  * 物理計算を担当する Web Worker。メインスレッド（描画）を止めないために分けている。
  */
+import { simulateShot } from '../match/shot.ts';
 import { simulate } from '../physics/simulate.ts';
 import type { Trajectory } from '../physics/types.ts';
 import type { SimRequest, SimResponse } from './protocol.ts';
@@ -14,12 +15,25 @@ function buffersOf(tr: Trajectory): ArrayBuffer[] {
   return arrays.map((array) => array.buffer as ArrayBuffer);
 }
 
+function handle(request: SimRequest): { response: SimResponse; transfer: ArrayBuffer[] } {
+  if (request.type === 'simulate') {
+    const trajectory = simulate(request.kick, request.params, request.options);
+    return { response: { id: request.id, type: 'trajectory', trajectory }, transfer: buffersOf(trajectory) };
+  }
+  const result = simulateShot(request.kick, request.params, request.scenario, request.options);
+  const transfer = [
+    ...buffersOf(result.trajectory),
+    result.keeper.z.buffer as ArrayBuffer,
+    result.keeper.lean.buffer as ArrayBuffer,
+  ];
+  return { response: { id: request.id, type: 'shot', result }, transfer };
+}
+
 self.onmessage = (event: MessageEvent<SimRequest>): void => {
   const request = event.data;
   try {
-    const trajectory = simulate(request.kick, request.params, request.options);
-    const response: SimResponse = { id: request.id, type: 'trajectory', trajectory };
-    self.postMessage(response, buffersOf(trajectory));
+    const { response, transfer } = handle(request);
+    self.postMessage(response, transfer);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const response: SimResponse = { id: request.id, type: 'error', message };
