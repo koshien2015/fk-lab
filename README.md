@@ -2,7 +2,7 @@
 
 物理で蹴るフリーキック・ラボ。「ボールのどこを、どの向きに、どの強さで蹴ると、なぜそう曲がるのか」を 3D と力ベクトルで見える化します。
 
-制作中です（マイルストーン 2: 最小の 3D 表示まで完了）。仕様は [SPEC.md](SPEC.md)、制作の記録は [docs/LOG.md](docs/LOG.md) にあります。
+制作中です（マイルストーン 3: キック入力の UI まで完了）。仕様は [SPEC.md](SPEC.md)、制作の記録は [docs/LOG.md](docs/LOG.md) にあります。
 
 - コードはすべて Claude Code（Fable 5.2）が書いています。
 - 設計の参考: [cap-flight-sim](https://github.com/koshien2015/cap-flight-sim)（キャップ野球の飛翔シミュレータ）。コードは流用せず、新しく書いています。

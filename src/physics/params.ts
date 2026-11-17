@@ -82,6 +82,18 @@ export const PARAM_DEFS = {
     value: 0.1, unit: '', label: 'ストローハル数 St', assumed: true,
     note: '代表周波数 f = St·|v|/(2R)', min: 0.02, max: 0.3,
   },
+  kickEfficiency: {
+    value: 0.85, unit: '', label: 'キック効率 e', assumed: true,
+    note: '初速 v₀ = e·J/m', min: 0.5, max: 1,
+  },
+  maxImpulse: {
+    value: 17.7, unit: 'N·s', label: '力積の上限 J_max', assumed: true,
+    note: '強さ 100% で初速 約 35 m/s になる値', min: 10, max: 20,
+  },
+  spinTransfer: {
+    value: 0.3, unit: '', label: '回転の伝達係数 κ', assumed: true,
+    note: 'ω₀ = κ·(r × J)/I（足との摩擦）', min: 0, max: 1,
+  },
 } as const satisfies Record<string, ParamDef>;
 
 export type ParamKey = keyof typeof PARAM_DEFS;

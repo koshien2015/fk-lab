@@ -3,11 +3,17 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import type { Spot } from '../field/placement.ts';
+import type { CameraView } from './cameraViews.ts';
 
 export interface Stage {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly controls: OrbitControls;
+  readonly canvas: HTMLCanvasElement;
+  setView(view: CameraView): void;
+  /** 画面上の点が指す地面（y = 0）の位置。地面を指していなければ null。 */
+  groundPoint(clientX: number, clientY: number): Spot | null;
   /** 毎フレーム呼ぶ関数を登録する。引数は前フレームからの経過秒。 */
   onFrame(callback: (dt: number) => void): void;
 }
@@ -56,7 +62,20 @@ export function createStage(container: HTMLElement): Stage {
     camera.updateProjectionMatrix();
   };
   resize();
-  window.addEventListener('resize', resize);
+  new ResizeObserver(resize).observe(container);
+
+  const raycaster = new THREE.Raycaster();
+  const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const hit = new THREE.Vector3();
+  const groundPoint = (clientX: number, clientY: number): Spot | null => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    raycaster.setFromCamera(ndc, camera);
+    return raycaster.ray.intersectPlane(ground, hit) ? { x: hit.x, z: hit.z } : null;
+  };
 
   const callbacks: Array<(dt: number) => void> = [];
   const timer = new THREE.Timer();
@@ -72,6 +91,13 @@ export function createStage(container: HTMLElement): Stage {
     scene,
     camera,
     controls,
+    canvas: renderer.domElement,
+    setView(view) {
+      camera.position.set(...view.position);
+      controls.target.set(...view.target);
+      controls.update();
+    },
+    groundPoint,
     onFrame: (callback) => void callbacks.push(callback),
   };
 }
