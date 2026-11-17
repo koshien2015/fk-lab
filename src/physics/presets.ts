@@ -9,6 +9,8 @@ export interface DemoKick {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /** ゴールラインからボールまでの距離 [m] */
+  readonly distance: number;
   readonly kick: KickState;
 }
 
@@ -31,9 +33,10 @@ export const DEMO_KICKS: readonly DemoKick[] = [
     id: 'curve',
     label: 'カーブ',
     description: '左へ打ち出し、8 rps の横回転で右へ巻く',
+    distance: 25,
     kick: {
       position: [0, BALL_RADIUS, 0],
-      velocity: launch(27, 16, -9),
+      velocity: launch(27, 14.5, -4),
       omega: [0, -8 * RPS, 1.5 * RPS],
     },
   },
@@ -41,6 +44,7 @@ export const DEMO_KICKS: readonly DemoKick[] = [
     id: 'knuckle',
     label: 'ナックル（無回転）',
     description: '回転ほぼゼロ。渦の剥離による横力で揺れる',
+    distance: 25,
     kick: {
       position: [0, BALL_RADIUS, 0],
       velocity: launch(29, 13, 0),
@@ -51,6 +55,7 @@ export const DEMO_KICKS: readonly DemoKick[] = [
     id: 'drive',
     label: 'ドライブ（縦回転）',
     description: '7 rps のトップスピンで急に落ちる',
+    distance: 20,
     kick: {
       position: [0, BALL_RADIUS, 0],
       velocity: launch(28, 19, 0),
@@ -61,6 +66,7 @@ export const DEMO_KICKS: readonly DemoKick[] = [
     id: 'straight',
     label: '比較用（回転なし・ナックルなし相当）',
     description: 'ナックルと同じ打ち出し。力の内訳を比べる基準',
+    distance: 25,
     kick: {
       position: [0, BALL_RADIUS, 0],
       velocity: launch(29, 13, 0),
