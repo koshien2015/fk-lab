@@ -14,6 +14,19 @@ import { createSliderRow } from './sliderRow.ts';
 export interface PanelActions {
   readonly onKick: () => void;
   readonly onTogglePlacing: () => void;
+  readonly onToggleArrows: () => void;
+  readonly onTogglePreview: () => void;
+  /** いまの軌道を、比較用に残す */
+  readonly onPin: () => void;
+  readonly onClearPins: () => void;
+}
+
+export interface ViewState {
+  readonly arrows: boolean;
+  readonly preview: boolean;
+  /** 残せる軌道があるか */
+  readonly canPin: boolean;
+  readonly pinCount: number;
 }
 
 export interface PanelView {
@@ -21,6 +34,7 @@ export interface PanelView {
   /** 位置を選んでいる最中かどうかを反映する */
   setPlacing(placing: boolean): void;
   setStatus(text: string): void;
+  setView(view: ViewState): void;
 }
 
 function spinText(spin: SpinDescription): string {
@@ -106,6 +120,16 @@ export function createPanel(
     return { choice, button };
   });
 
+  const chip = (label: string, onClick: () => void): HTMLButtonElement => {
+    const button = h('button', { type: 'button', class: 'chip' }, label);
+    button.addEventListener('click', onClick);
+    return button;
+  };
+  const arrows = chip('力ベクトル', actions.onToggleArrows);
+  const previewLine = chip('予測線', actions.onTogglePreview);
+  const pin = chip('この軌道を残す', actions.onPin);
+  const clearPins = chip('比較を消す', actions.onClearPins);
+
   const kick = h('button', { type: 'button', class: 'kick' }, '蹴る');
   kick.addEventListener('click', actions.onKick);
   const status = h('p', { class: 'status' });
@@ -133,6 +157,8 @@ export function createPanel(
       ...keepers.map((k) => k.button),
     ),
     h('div', { class: 'group action' }, kick, status),
+    h('div', { class: 'group row' }, h('span', { class: 'caption' }, '表示'), arrows, previewLine),
+    h('div', { class: 'group row' }, h('span', { class: 'caption' }, '比較'), pin, clearPins),
   );
 
   const render = (setup: KickSetup): void => {
@@ -166,5 +192,11 @@ export function createPanel(
       setText(place, placing ? 'この位置に決める' : 'ボールの位置を変える');
     },
     setStatus: (text) => setText(status, text),
+    setView(view) {
+      arrows.setAttribute('aria-pressed', String(view.arrows));
+      previewLine.setAttribute('aria-pressed', String(view.preview));
+      pin.disabled = !view.canPin;
+      clearPins.disabled = view.pinCount === 0;
+    },
   };
 }

@@ -1,34 +1,45 @@
 /**
- * アプリ本体。場面を組み立て、設定 → 予測線 → 蹴る → 再生 の流れをつなぐ。
+ * アプリ本体。場面を組み立て、設定 → 予測線 → 蹴る → 再生 → 解説 の流れをつなぐ。
  */
 import { keeperStartZ, type KeeperPose } from '../match/keeper.ts';
 import type { ShotResult } from '../match/shot.ts';
 import { OUTCOME_LABELS, verdictTime } from '../match/verdict.ts';
 import { jumpHeight, wallPlayers } from '../match/wall.ts';
-import { defaultParams } from '../physics/params.ts';
+import { describeSpin } from '../physics/kick.ts';
+import { defaultParams, type PhysicsParams } from '../physics/params.ts';
+import type { KickState } from '../physics/types.ts';
 import { sampleTrajectory } from '../playback/sample.ts';
 import { createActors } from '../scene/actors.ts';
 import { createBall } from '../scene/ball.ts';
 import { kickerView, overviewView } from '../scene/cameraViews.ts';
+import { createForceArrows } from '../scene/forceArrows.ts';
 import { createGoal } from '../scene/goal.ts';
 import { createPitch } from '../scene/pitch.ts';
 import { createStage } from '../scene/stage.ts';
 import { createTrail } from '../scene/trail.ts';
 import { h } from '../ui/dom.ts';
 import { createPanel } from '../ui/panel.ts';
+import { createTimeline } from '../ui/timeline.ts';
+import { createWhyPanel } from '../ui/whyPanel.ts';
 import { createSimClient } from '../worker/simClient.ts';
+import { createCompare } from './compare.ts';
+import { advance, seek, setRate, startFlight, togglePlay, type Flight } from './flight.ts';
 import { createHud } from './hud.ts';
 import { createPlacement } from './placement.ts';
 import { createPreviewer } from './previewer.ts';
-import { DEFAULT_SETUP, toKickState, toScenario, type KickSetup } from './setup.ts';
+import { DEFAULT_SETUP, toKickInput, toKickState, toScenario, type KickSetup } from './setup.ts';
 import { createStore } from './store.ts';
 
-/** 再生中のキックと、いまの再生時刻。null なら構えている最中。 */
-interface Flight {
+/** 蹴った 1 本ぶんの記録 */
+interface Shot {
   readonly result: ShotResult;
   readonly setup: KickSetup;
-  readonly time: number;
+  readonly kick: KickState;
 }
+
+const AIM_HINT = '蹴る点・向き・強さを決めて「蹴る」。視点はドラッグで回せます。';
+const PLACE_HINT = 'ピッチをクリックまたはドラッグして、ボールを置く位置を選びます。';
+const FLIGHT_HINT = '下のバーでスロー再生や巻き戻しができます。設定を変えると構え直します。';
 
 /** 記録点 index での GK の姿勢 */
 function keeperPoseAt(result: ShotResult, index: number): KeeperPose | null {
@@ -37,8 +48,12 @@ function keeperPoseAt(result: ShotResult, index: number): KeeperPose | null {
   return { z: result.keeper.z[i], lean: result.keeper.lean[i] };
 }
 
-const AIM_HINT = '蹴る点・向き・強さを決めて「蹴る」。視点はドラッグで回せます。';
-const PLACE_HINT = 'ピッチをクリックまたはドラッグして、ボールを置く位置を選びます。';
+/** 比較の一覧に出す、蹴り方の短い説明 */
+function shotLabel({ setup, result }: Shot, params: PhysicsParams): string {
+  const spin = describeSpin(toKickInput(setup), params);
+  const kind = spin.knuckle ? 'ナックル' : `${spin.rps.toFixed(1)} rps`;
+  return `${kind}・${Math.round(setup.power * 100)}% → ${OUTCOME_LABELS[result.outcome]}`;
+}
 
 export function startApp(root: HTMLElement): void {
   const params = defaultParams();
@@ -47,37 +62,60 @@ export function startApp(root: HTMLElement): void {
   root.append(viewport);
 
   const stage = createStage(viewport);
+  const sim = createSimClient();
   const ball = createBall(params.radius);
   const trail = createTrail();
   const preview = createTrail({ width: 2, opacity: 0.4 });
-  const hud = createHud();
-  const sim = createSimClient();
-  let flight: Flight | null = null;
-
+  const arrows = createForceArrows(params.radius);
   const actors = createActors();
+  const compare = createCompare();
+  const hud = createHud(params);
+  const why = createWhyPanel(params);
   const banner = h('div', { class: 'overlay banner' });
   const placement = createPlacement(stage, (spot) => store.set({ spot }));
+
+  let flight: Flight<Shot> | null = null;
+  let view = { arrows: true, preview: true };
+  let rate = 1;
+  /** 解説パネルを出し終えたキック（同じキックで何度も開き直さない） */
+  let explained: Shot | null = null;
+
+  const timeline = createTimeline({
+    onTogglePlay: () => void (flight = flight && togglePlay(flight)),
+    onSeek: (time) => void (flight = flight && seek(flight, time)),
+    onRate: (next) => {
+      rate = next;
+      flight = flight && setRate(flight, next);
+    },
+  });
+
   stage.scene.add(
     createPitch(),
     createGoal(),
     ball.mesh,
     trail.object,
     preview.object,
+    arrows.object,
     placement.marker,
     actors.object,
+    compare.object,
   );
-
   const title = h('div', { class: 'overlay title' }, 'FK Lab');
   title.append(
     h('small', {}, '空力係数は仮定値です（実測ではありません）。', h('a', { href: './graphs.html' }, '物理コアのグラフ')),
   );
-  viewport.append(title, hud.element, banner);
+  viewport.append(title, compare.element, hud.element, banner, why.element, timeline.element);
 
-  /** 構えの姿に戻す（ボールを置き、予測線を出す） */
+  const syncView = (): void => {
+    preview.object.visible = view.preview && !flight;
+    arrows.setVisible(view.arrows && flight !== null);
+    panel.setView({ ...view, canPin: flight !== null, pinCount: compare.count() });
+  };
+
+  /** 構えの姿に戻す（ボールを置き、壁と GK を並べ、予測線を出す） */
   const showAim = (setup: KickSetup): void => {
     flight = null;
     trail.reveal(0);
-    preview.object.visible = true;
     ball.show({ position: [setup.spot.x, params.radius, setup.spot.z], quaternion: [0, 0, 0, 1] });
     placement.showAt(setup.spot);
     const players = wallPlayers(setup.spot, setup.wall);
@@ -87,6 +125,9 @@ export function startApp(root: HTMLElement): void {
       setup.keeper === 'none' ? null : { z: keeperStartZ(setup.spot, players.length > 0), lean: 0 },
     );
     banner.classList.remove('show');
+    why.hide();
+    timeline.setVisible(false);
+    syncView();
   };
 
   const previewer = createPreviewer(sim, params, (trajectory, setup) => {
@@ -95,12 +136,6 @@ export function startApp(root: HTMLElement): void {
     preview.reveal(trajectory.count);
     hud.update(sampleTrajectory(trajectory, 0));
   });
-
-  const panel = createPanel(store, params, {
-    onKick: () => void kick(),
-    onTogglePlacing: () => setPlacing(!placement.isActive()),
-  });
-  root.append(panel.element);
 
   const setPlacing = (placing: boolean): void => {
     placement.setActive(placing);
@@ -115,19 +150,44 @@ export function startApp(root: HTMLElement): void {
     const setup = store.get();
     showAim(setup);
     try {
-      const result = await sim.shot(toKickState(setup, params), params, toScenario(setup));
+      const state = toKickState(setup, params);
+      const result = await sim.shot(state, params, toScenario(setup));
       if (setup !== store.get()) return;
       trail.setTrajectory(result.trajectory);
-      preview.object.visible = false;
       banner.textContent = OUTCOME_LABELS[result.outcome];
       banner.dataset.outcome = result.outcome;
-      flight = { result, setup, time: 0 };
-      panel.setStatus('設定を変えると、構え直します。');
+      const shot: Shot = { result, setup, kick: state };
+      flight = startFlight({ duration: result.trajectory.final.t, payload: shot }, rate);
+      timeline.setVisible(true);
+      panel.setStatus(FLIGHT_HINT);
+      syncView();
     } catch (error) {
       console.error('キックの計算に失敗しました', error);
       panel.setStatus('計算に失敗しました。もう一度試してください。');
     }
   };
+
+  const panel = createPanel(store, params, {
+    onKick: () => void kick(),
+    onTogglePlacing: () => setPlacing(!placement.isActive()),
+    onToggleArrows: () => {
+      view = { ...view, arrows: !view.arrows };
+      syncView();
+    },
+    onTogglePreview: () => {
+      view = { ...view, preview: !view.preview };
+      syncView();
+    },
+    onPin: () => {
+      if (flight) compare.pin(flight.payload.result.trajectory, shotLabel(flight.payload, params));
+      syncView();
+    },
+    onClearPins: () => {
+      compare.clear();
+      syncView();
+    },
+  });
+  root.append(panel.element);
 
   store.subscribe((setup, previous) => {
     showAim(setup);
@@ -136,18 +196,30 @@ export function startApp(root: HTMLElement): void {
     if (!placement.isActive()) panel.setStatus(AIM_HINT);
   });
 
-  stage.onFrame((dt) => {
-    if (!flight) return;
-    const { result, setup } = flight;
-    const time = Math.min(flight.time + dt, result.trajectory.final.t);
-    flight = { ...flight, time };
-    const sample = sampleTrajectory(result.trajectory, time);
+  /** 再生中の 1 コマを画面に反映する */
+  const renderFlight = (current: Flight<Shot>): void => {
+    const { result, setup, kick: state } = current.payload;
+    const sample = sampleTrajectory(result.trajectory, current.time);
     ball.show(sample);
     trail.reveal(sample.index);
     hud.update(sample);
+    arrows.update(sample);
     actors.setKeeper(keeperPoseAt(result, sample.index));
-    actors.setWallLift(jumpHeight(time, setup.wall));
-    banner.classList.toggle('show', time >= verdictTime(result));
+    actors.setWallLift(jumpHeight(current.time, setup.wall));
+    timeline.render(current);
+
+    const decided = current.time >= verdictTime(result);
+    banner.classList.toggle('show', decided);
+    if (decided && explained !== current.payload) {
+      explained = current.payload;
+      why.show(result.trajectory, state, result.flightTime);
+    }
+  };
+
+  stage.onFrame((dt) => {
+    if (!flight) return;
+    flight = advance(flight, dt);
+    renderFlight(flight);
   });
 
   showAim(store.get());

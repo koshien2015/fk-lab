@@ -29,9 +29,11 @@ export interface TrailStyle {
   /** 線の太さ [px] */
   readonly width?: number;
   readonly opacity?: number;
+  /** 指定すると、速さによらずこの色で描く（比較用） */
+  readonly color?: string;
 }
 
-export function createTrail({ width = 3.5, opacity = 0.95 }: TrailStyle = {}): TrailView {
+export function createTrail({ width = 3.5, opacity = 0.95, color: fixed }: TrailStyle = {}): TrailView {
   const material = new LineMaterial({ linewidth: width, vertexColors: true, transparent: true, opacity });
   const line = new Line2(new LineGeometry(), material);
   line.frustumCulled = false;
@@ -44,7 +46,8 @@ export function createTrail({ width = 3.5, opacity = 0.95 }: TrailStyle = {}): T
       const colors = new Float32Array(tr.count * 3);
       const color = new THREE.Color();
       for (let i = 0; i < tr.count; i++) {
-        speedColor(Math.hypot(tr.vel[i * 3], tr.vel[i * 3 + 1], tr.vel[i * 3 + 2]), color);
+        if (fixed) color.set(fixed);
+        else speedColor(Math.hypot(tr.vel[i * 3], tr.vel[i * 3 + 1], tr.vel[i * 3 + 2]), color);
         color.toArray(colors, i * 3);
       }
       const geometry = new LineGeometry();
