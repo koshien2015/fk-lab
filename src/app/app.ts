@@ -1,6 +1,8 @@
 /**
  * アプリ本体。場面を組み立て、設定 → 予測線 → 蹴る → 再生 → 解説 の流れをつなぐ。
  */
+import { createSoundKit } from '../audio/sound.ts';
+import { slowFactor } from '../fx/direction.ts';
 import { keeperStartZ, type KeeperPose } from '../match/keeper.ts';
 import type { ShotResult } from '../match/shot.ts';
 import { OUTCOME_LABELS, verdictTime } from '../match/verdict.ts';
@@ -11,20 +13,27 @@ import type { KickState } from '../physics/types.ts';
 import { sampleTrajectory } from '../playback/sample.ts';
 import { createActors } from '../scene/actors.ts';
 import { createBall } from '../scene/ball.ts';
-import { kickerView, overviewView } from '../scene/cameraViews.ts';
+import { createCameraRig } from '../scene/cameraRig.ts';
+import { overviewView, type BallMotion } from '../scene/cameraViews.ts';
 import { createForceArrows } from '../scene/forceArrows.ts';
 import { createGoal } from '../scene/goal.ts';
+import { createNet } from '../scene/net.ts';
+import { createConfetti } from '../scene/particles.ts';
 import { createPitch } from '../scene/pitch.ts';
 import { createSearchLines } from '../scene/searchLines.ts';
+import { createStadium } from '../scene/stadium.ts';
 import { createStage } from '../scene/stage.ts';
 import { createTrail } from '../scene/trail.ts';
+import { createBanner } from '../ui/banner.ts';
 import { h } from '../ui/dom.ts';
 import { createPanel } from '../ui/panel.ts';
 import { createTimeline } from '../ui/timeline.ts';
+import { createToolbar } from '../ui/toolbar.ts';
 import { createWhyPanel } from '../ui/whyPanel.ts';
 import type { GoalTarget, SpinStyle } from '../solver/inverse.ts';
 import { createSimClient } from '../worker/simClient.ts';
 import { createCompare } from './compare.ts';
+import { createEffects } from './effects.ts';
 import { advance, seek, setRate, startFlight, togglePlay, type Flight } from './flight.ts';
 import { createHud } from './hud.ts';
 import { createInverseMode } from './inverseMode.ts';
@@ -75,7 +84,12 @@ export function startApp(root: HTMLElement): void {
   const compare = createCompare();
   const hud = createHud(params);
   const why = createWhyPanel(params);
-  const banner = h('div', { class: 'overlay banner' });
+  const banner = createBanner();
+  const net = createNet();
+  const confetti = createConfetti();
+  const sound = createSoundKit();
+  const effects = createEffects({ sound, net, confetti, flash: banner.flash });
+  const rig = createCameraRig(stage);
   const placement = createPlacement(stage, (spot) => store.set({ spot }));
   const searchLines = createSearchLines();
   const inverse = createInverseMode(stage, (target) => void solve(target));
@@ -96,9 +110,25 @@ export function startApp(root: HTMLElement): void {
     },
   });
 
+  const toolbar = createToolbar({
+    onCamera: (mode) => {
+      rig.setMode(mode, store.get().spot);
+      renderToolbar();
+    },
+    onToggleSound: () => {
+      sound.unlock();
+      sound.setMuted(!sound.isMuted());
+      renderToolbar();
+    },
+  });
+  const renderToolbar = (): void => toolbar.render({ camera: rig.mode(), muted: sound.isMuted() });
+
   stage.scene.add(
+    createStadium(),
     createPitch(),
     createGoal(),
+    net.object,
+    confetti.object,
     ball.mesh,
     trail.object,
     preview.object,
@@ -111,9 +141,18 @@ export function startApp(root: HTMLElement): void {
   );
   const title = h('div', { class: 'overlay title' }, 'FK Lab');
   title.append(
-    h('small', {}, '空力係数は仮定値です（実測ではありません）。', h('a', { href: './graphs.html' }, '物理コアのグラフ')),
+    h('small', {}, '空力係数は仮定値です（実測ではありません）。', h('a', { href: './graphs.html' }, 'グラフ')),
   );
-  viewport.append(title, compare.element, hud.element, banner, why.element, timeline.element);
+  viewport.append(
+    banner.flashElement,
+    title,
+    toolbar.element,
+    compare.element,
+    hud.element,
+    banner.element,
+    why.element,
+    timeline.element,
+  );
 
   const syncView = (): void => {
     preview.object.visible = view.preview && !flight;
@@ -133,9 +172,10 @@ export function startApp(root: HTMLElement): void {
     actors.setKeeper(
       setup.keeper === 'none' ? null : { z: keeperStartZ(setup.spot, players.length > 0), lean: 0 },
     );
-    banner.classList.remove('show');
+    banner.setVisible(false);
     why.hide();
     timeline.setVisible(false);
+    if (!placement.isActive()) rig.settle(setup.spot);
     syncView();
   };
 
@@ -184,21 +224,27 @@ export function startApp(root: HTMLElement): void {
     panel.setPlacing(placing);
     panel.setStatus(placing ? PLACE_HINT : AIM_HINT);
     showAim(store.get());
-    stage.setView(placing ? overviewView() : kickerView(store.get().spot));
+    if (placing) {
+      stage.controls.enabled = false;
+      stage.setView(overviewView());
+    } else {
+      rig.reset(store.get().spot);
+    }
   };
 
   const kick = async (): Promise<void> => {
     if (placement.isActive()) setPlacing(false);
     const setup = store.get();
     showAim(setup);
+    sound.unlock();
     try {
       const state = toKickState(setup, params);
       const result = await sim.shot(state, params, toScenario(setup));
       if (setup !== store.get()) return;
       trail.setTrajectory(result.trajectory);
-      banner.textContent = OUTCOME_LABELS[result.outcome];
-      banner.dataset.outcome = result.outcome;
       const shot: Shot = { result, setup, kick: state };
+      banner.set(result.outcome, shotLabel(shot, params).split(' → ')[0]);
+      effects.kick(setup.power);
       flight = startFlight({ duration: result.trajectory.final.t, payload: shot }, rate);
       timeline.setVisible(true);
       panel.setStatus(FLIGHT_HINT);
@@ -242,10 +288,9 @@ export function startApp(root: HTMLElement): void {
   });
   root.append(panel.element);
 
-  store.subscribe((setup, previous) => {
+  store.subscribe((setup) => {
     showAim(setup);
     previewer.request(setup);
-    if (setup.spot !== previous.spot && !placement.isActive()) stage.setView(kickerView(setup.spot));
     if (inverse.isActive()) panel.setStatus(INVERSE_HINT);
     else if (!placement.isActive()) panel.setStatus(AIM_HINT);
   });
@@ -263,23 +308,42 @@ export function startApp(root: HTMLElement): void {
     timeline.render(current);
 
     const decided = current.time >= verdictTime(result);
-    banner.classList.toggle('show', decided);
+    banner.setVisible(decided);
     if (decided && explained !== current.payload) {
       explained = current.payload;
       why.show(result.trajectory, state, result.flightTime);
     }
   };
 
+  /** 構えているときのボール（視点を決めるのに使う） */
+  const restingBall = (): BallMotion => {
+    const { spot } = store.get();
+    return { position: [spot.x, params.radius, spot.z], velocity: [0, 0, 0] };
+  };
+
   stage.onFrame((dt) => {
     searchLines.update(dt);
-    if (!flight) return;
-    flight = advance(flight, dt);
+    net.update(dt);
+    confetti.update(dt);
+    if (!flight) {
+      if (!placement.isActive()) rig.update(dt, restingBall(), false);
+      return;
+    }
+    const { result } = flight.payload;
+    const previous = flight.time;
+    // 等速で再生しているときは、ゴールの前後を自動でスローにする
+    const slow = flight.rate === 1 ? slowFactor(result.events, previous) : 1;
+    flight = advance(flight, dt * slow);
+    if (flight.playing || flight.time > previous) effects.advance(result, previous, flight.time);
     renderFlight(flight);
+    const sample = sampleTrajectory(result.trajectory, flight.time);
+    const goal = result.events.find((event) => event.kind === 'goal');
+    rig.update(dt, sample, goal !== undefined && flight.time >= goal.t - 0.25);
   });
 
   showAim(store.get());
   previewer.request(store.get());
-  stage.setView(kickerView(store.get().spot));
+  renderToolbar();
   panel.setStatus(AIM_HINT);
   panel.setInverse({ active: false, style: inverseStyle });
 }

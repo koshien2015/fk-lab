@@ -48,8 +48,15 @@ function chart(shares: readonly ForceShare[], axis: (typeof AXES)[number]): HTML
 export function createWhyPanel(params: PhysicsParams): WhyPanel {
   const body = h('div', { class: 'why-body' });
   const close = h('button', { type: 'button', class: 'why-close', title: '閉じる' }, '×');
-  const element = h('aside', { class: 'overlay why' }, h('h2', {}, 'なぜ曲がった？', close), body);
-  close.addEventListener('click', () => element.classList.remove('show'));
+  const heading = h('h2', {}, 'なぜ曲がった？', close);
+  const element = h('aside', { class: 'overlay why' }, heading, body);
+  close.addEventListener('click', (event) => {
+    event.stopPropagation();
+    element.classList.remove('show');
+  });
+  // 見出しを押すと、中身を畳む・開く（狭い画面では 3D を隠さないよう、畳んだ状態で出す）
+  heading.addEventListener('click', () => element.classList.toggle('collapsed'));
+  const narrow = window.matchMedia('(max-width: 760px)');
 
   return {
     element,
@@ -61,6 +68,7 @@ export function createWhyPanel(params: PhysicsParams): WhyPanel {
         h('ul', {}, ...explainFlight(trajectory, kick, params, flightTime).map((line) => h('li', {}, line))),
         h('p', { class: 'why-note' }, '空力係数は仮定値です。'),
       );
+      element.classList.toggle('collapsed', narrow.matches);
       element.classList.add('show');
     },
     hide: () => element.classList.remove('show'),
