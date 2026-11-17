@@ -13,7 +13,7 @@ export interface Previewer {
 
 export function createPreviewer(
   sim: SimClient,
-  params: PhysicsParams,
+  getParams: () => PhysicsParams,
   onResult: (trajectory: Trajectory, setup: KickSetup) => void,
 ): Previewer {
   let running = false;
@@ -21,6 +21,7 @@ export function createPreviewer(
 
   const run = async (setup: KickSetup): Promise<void> => {
     running = true;
+    const params = getParams();
     try {
       // 予測線は、何にも当たらない飛翔をゴールラインまで描く
       const trajectory = await sim.simulate(toKickState(setup, params), params, {

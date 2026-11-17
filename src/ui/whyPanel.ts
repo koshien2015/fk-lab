@@ -45,7 +45,7 @@ function chart(shares: readonly ForceShare[], axis: (typeof AXES)[number]): HTML
   );
 }
 
-export function createWhyPanel(params: PhysicsParams): WhyPanel {
+export function createWhyPanel(getParams: () => PhysicsParams): WhyPanel {
   const body = h('div', { class: 'why-body' });
   const close = h('button', { type: 'button', class: 'why-close', title: '閉じる' }, '×');
   const heading = h('h2', {}, 'なぜ曲がった？', close);
@@ -65,7 +65,7 @@ export function createWhyPanel(params: PhysicsParams): WhyPanel {
       body.replaceChildren(
         h('p', { class: 'why-note' }, `蹴ってから ${flightTime.toFixed(2)} 秒間（最初に何かに当たるまで）の、力ごとの積分値。`),
         ...AXES.map((axis) => chart(shares, axis)),
-        h('ul', {}, ...explainFlight(trajectory, kick, params, flightTime).map((line) => h('li', {}, line))),
+        h('ul', {}, ...explainFlight(trajectory, kick, getParams(), flightTime).map((line) => h('li', {}, line))),
         h('p', { class: 'why-note' }, '空力係数は仮定値です。'),
       );
       element.classList.toggle('collapsed', narrow.matches);

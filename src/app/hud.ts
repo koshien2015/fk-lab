@@ -32,7 +32,7 @@ function regime(re: number, params: PhysicsParams): string {
   return offset > 2 ? '超臨界' : offset < -2 ? '亜臨界' : '臨界域';
 }
 
-export function createHud(params: PhysicsParams): Hud {
+export function createHud(getParams: () => PhysicsParams): Hud {
   const cells = new Map<string, HTMLElement>();
   const row = (key: string, label: string, color?: string): HTMLElement[] => {
     const term = h('dt', {}, label);
@@ -63,7 +63,7 @@ export function createHud(params: PhysicsParams): Hud {
       set('speed', `${speed.toFixed(1)} m/s（${(speed * 3.6).toFixed(0)} km/h）`);
       set('spin', `${rps.toFixed(1)} rps`);
       set('axis', rps < 0.3 ? '無回転' : `横 ${percent(mix.side)}・縦 ${percent(mix.vertical)}`);
-      set('re', `${(sample.re / 1e5).toFixed(2)}×10⁵（${regime(sample.re, params)}）`);
+      set('re', `${(sample.re / 1e5).toFixed(2)}×10⁵（${regime(sample.re, getParams())}）`);
       set('cd', sample.cd.toFixed(2));
       set('s', sample.spin.toFixed(2));
       for (const style of FORCE_STYLES) {

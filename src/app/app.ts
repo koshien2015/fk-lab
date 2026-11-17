@@ -69,21 +69,23 @@ function shotLabel({ setup, result }: Shot, params: PhysicsParams): string {
 }
 
 export function startApp(root: HTMLElement): void {
-  const params = defaultParams();
+  const paramStore = createStore<PhysicsParams>(defaultParams());
+  /** いまの物理パラメータ（操作パネルで変えられる） */
+  const getParams = (): PhysicsParams => paramStore.get();
   const store = createStore<KickSetup>(DEFAULT_SETUP);
   const viewport = h('div', { class: 'viewport' });
   root.append(viewport);
 
   const stage = createStage(viewport);
   const sim = createSimClient();
-  const ball = createBall(params.radius);
+  const ball = createBall(getParams().radius);
   const trail = createTrail();
   const preview = createTrail({ width: 2, opacity: 0.4 });
-  const arrows = createForceArrows(params.radius);
+  const arrows = createForceArrows(getParams().radius);
   const actors = createActors();
   const compare = createCompare();
-  const hud = createHud(params);
-  const why = createWhyPanel(params);
+  const hud = createHud(getParams);
+  const why = createWhyPanel(getParams);
   const banner = createBanner();
   /** ネットの形は Worker で作る（たるんだ状態を計算する）ので、届いてから表示する */
   let net: NetView | null = null;
@@ -164,7 +166,7 @@ export function startApp(root: HTMLElement): void {
   const showAim = (setup: KickSetup): void => {
     flight = null;
     trail.reveal(0);
-    ball.show({ position: [setup.spot.x, params.radius, setup.spot.z], quaternion: [0, 0, 0, 1] });
+    ball.show({ position: [setup.spot.x, getParams().radius, setup.spot.z], quaternion: [0, 0, 0, 1] });
     placement.showAt(setup.spot);
     const players = wallPlayers(setup.spot, setup.wall);
     actors.setWall(players, setup.spot);
@@ -180,7 +182,7 @@ export function startApp(root: HTMLElement): void {
     syncView();
   };
 
-  const previewer = createPreviewer(sim, params, (trajectory, setup) => {
+  const previewer = createPreviewer(sim, getParams, (trajectory, setup) => {
     if (setup !== store.get() || flight) return;
     preview.setTrajectory(trajectory);
     preview.reveal(trajectory.count);
@@ -202,7 +204,7 @@ export function startApp(root: HTMLElement): void {
     inverse.showTarget(target);
     panel.setStatus('蹴り方を探しています…');
     try {
-      const solution = await sim.solve({ setup, target, style: inverseStyle }, params);
+      const solution = await sim.solve({ setup, target, style: inverseStyle }, getParams());
       if (setup !== store.get()) return;
       searchLines.play(solution.candidates);
       store.set(solution.patch);
@@ -238,10 +240,11 @@ export function startApp(root: HTMLElement): void {
     const setup = store.get();
     showAim(setup);
     sound.unlock();
+    const params = getParams();
     try {
       const state = toKickState(setup, params);
       const result = await sim.shot(state, params, toScenario(setup));
-      if (setup !== store.get()) return;
+      if (setup !== store.get() || params !== getParams()) return;
       trail.setTrajectory(result.trajectory);
       const shot: Shot = { result, setup, kick: state };
       banner.set(result.outcome, shotLabel(shot, params).split(' → ')[0]);
@@ -256,7 +259,7 @@ export function startApp(root: HTMLElement): void {
     }
   };
 
-  const panel = createPanel(store, params, {
+  const panel = createPanel(store, paramStore, {
     onKick: () => void kick(),
     onTogglePlacing: () => setPlacing(!placement.isActive()),
     onToggleArrows: () => {
@@ -268,7 +271,7 @@ export function startApp(root: HTMLElement): void {
       syncView();
     },
     onPin: () => {
-      if (flight) compare.pin(flight.payload.result.trajectory, shotLabel(flight.payload, params));
+      if (flight) compare.pin(flight.payload.result.trajectory, shotLabel(flight.payload, getParams()));
       syncView();
     },
     onClearPins: () => {
@@ -296,6 +299,12 @@ export function startApp(root: HTMLElement): void {
     else if (!placement.isActive()) panel.setStatus(AIM_HINT);
   });
 
+  // 物理パラメータを変えたら、構え直して予測線を引き直す
+  paramStore.subscribe(() => {
+    showAim(store.get());
+    previewer.request(store.get());
+  });
+
   /** 再生中の 1 コマを画面に反映する */
   const renderFlight = (current: Flight<Shot>): void => {
     const { result, setup, kick: state } = current.payload;
@@ -320,7 +329,7 @@ export function startApp(root: HTMLElement): void {
   /** 構えているときのボール（視点を決めるのに使う） */
   const restingBall = (): BallMotion => {
     const { spot } = store.get();
-    return { position: [spot.x, params.radius, spot.z], velocity: [0, 0, 0] };
+    return { position: [spot.x, getParams().radius, spot.z], velocity: [0, 0, 0] };
   };
 
   stage.onFrame((dt) => {

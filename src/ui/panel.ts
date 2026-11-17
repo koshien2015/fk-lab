@@ -11,6 +11,7 @@ import type { PhysicsParams } from '../physics/params.ts';
 import type { SpinStyle } from '../solver/inverse.ts';
 import { createContactPicker } from './contactPicker.ts';
 import { h, setText } from './dom.ts';
+import { createParamsPanel } from './paramsPanel.ts';
 import { createSliderRow } from './sliderRow.ts';
 
 export interface PanelActions {
@@ -76,12 +77,15 @@ const signedDeg = (v: number): string =>
 
 export function createPanel(
   store: Store<KickSetup>,
-  params: PhysicsParams,
+  paramStore: Store<PhysicsParams>,
   actions: PanelActions,
 ): PanelView {
   const picker = createContactPicker((contact) => store.set({ contact }));
   const spin = h('p', { class: 'spin-text' });
-  const maxSpeed = (params.kickEfficiency * params.maxImpulse) / params.mass;
+  const maxSpeed = (): number => {
+    const params = paramStore.get();
+    return (params.kickEfficiency * params.maxImpulse) / params.mass;
+  };
 
   const aim = createSliderRow({
     label: '左右の狙い',
@@ -98,7 +102,7 @@ export function createPanel(
   const power = createSliderRow({
     label: '強さ',
     ...SETUP_LIMITS.power,
-    format: (v) => `${Math.round(v * 100)}%（${(v * maxSpeed * 3.6).toFixed(0)} km/h）`,
+    format: (v) => `${Math.round(v * 100)}%（${(v * maxSpeed() * 3.6).toFixed(0)} km/h）`,
     onInput: (value) => store.set({ power: value }),
   });
 
@@ -201,11 +205,12 @@ export function createPanel(
     ),
     h('div', { class: 'group row' }, h('span', { class: 'caption' }, '表示'), arrows, previewLine),
     h('div', { class: 'group row' }, h('span', { class: 'caption' }, '比較'), pin, clearPins),
+    createParamsPanel(paramStore),
   );
 
   const render = (setup: KickSetup): void => {
     picker.render(setup.contact);
-    setText(spin, spinText(describeSpin(toKickInput(setup), params)));
+    setText(spin, spinText(describeSpin(toKickInput(setup), paramStore.get())));
     aim.render(setup.aimDeg);
     elevation.render(setup.elevationDeg);
     power.render(setup.power);
@@ -228,6 +233,7 @@ export function createPanel(
     }
   };
   store.subscribe(render);
+  paramStore.subscribe(() => render(store.get()));
   render(store.get());
 
   return {

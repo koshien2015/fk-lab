@@ -153,6 +153,15 @@ html, body {
 .slider-row output { color: var(--text); font-variant-numeric: tabular-nums; }
 .slider-row input { grid-column: 1 / -1; width: 100%; height: 28px; margin: 0; accent-color: var(--accent); }
 
+.params { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.params summary { cursor: pointer; font-size: 13px; }
+.params[open] summary { margin-bottom: 6px; }
+.params .slider-row { margin-bottom: 4px; }
+.badge {
+  margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+  color: #1b1203; background: var(--kick); vertical-align: middle;
+}
+
 button {
   font: inherit; color: var(--text); cursor: pointer; border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04); transition: background 0.15s, border-color 0.15s, transform 0.05s;
@@ -177,7 +186,7 @@ a { color: #7cc4ff; }
     border-left: 0; border-top: 1px solid var(--border); max-height: 50dvh; padding: 10px 12px;
     display: grid; grid-template-columns: 132px 1fr; gap: 8px 12px; align-items: start;
   }
-  .presets, .action, .defence { grid-column: 1 / -1; }
+  .presets, .action, .defence, .params { grid-column: 1 / -1; }
   .panel > .group.row { grid-column: 1 / -1; }
   .contact { grid-row: span 3; }
   .contact-picker { width: 132px; height: 132px; }
