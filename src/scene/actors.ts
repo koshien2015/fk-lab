@@ -14,7 +14,8 @@ export interface Actors {
   /** 壁のジャンプの高さ [m] */
   setWallLift(lift: number): void;
   /** GK の姿勢。null なら GK なし。 */
-  setKeeper(pose: KeeperPose | null): void;
+  /** lineX は GK が立つ線の x */
+  setKeeper(pose: KeeperPose | null, lineX?: number): void;
 }
 
 const WALL_STYLE = { shirt: 0xc8102e, shorts: 0xf2f2f2, socks: 0xc8102e, arms: 'guard' } as const;
@@ -49,10 +50,10 @@ export function createActors(): Actors {
     setWallLift(lift) {
       for (const figure of wall.children) figure.position.y = lift;
     },
-    setKeeper(pose) {
+    setKeeper(pose, lineX = KEEPER.lineX) {
       keeper.visible = pose !== null;
       if (!pose) return;
-      keeper.position.set(KEEPER.lineX, 0, pose.z);
+      keeper.position.set(lineX, 0, pose.z);
       // x 軸まわりに倒す（正の角度で +z の側へ）
       keeper.rotation.x = pose.lean;
     },

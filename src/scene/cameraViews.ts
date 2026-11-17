@@ -64,7 +64,9 @@ export function topView(spot: Spot): CameraView {
 /** 真横（右のタッチライン側）から、軌道の高さを見る */
 export function sideView(spot: Spot): CameraView {
   const midX = spot.x / 2;
-  return { position: [midX, 2.2, Math.max(24, Math.abs(spot.x) * 0.95)], target: [midX, 2, 0] };
+  // コーナーキックなど、ボールが横に離れているときは、ボールより外側まで下がる
+  const distance = Math.max(24, Math.abs(spot.x) * 0.95, Math.abs(spot.z) + 8);
+  return { position: [midX, 2.2 + distance * 0.06, distance], target: [midX, 2, spot.z * 0.4] };
 }
 
 /** ボールのすぐ後ろを追いかける。止まっているときは heading（前回の進行方向）を使う。 */

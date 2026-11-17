@@ -14,7 +14,7 @@
  * 数値はどれも仮定値。
  */
 import { FIELD } from '../field/dimensions.ts';
-import type { Spot } from '../field/placement.ts';
+import { isNearGoalLine, type Spot } from '../field/placement.ts';
 import { createRng } from '../physics/rng.ts';
 import type { Capsule } from './geometry.ts';
 
@@ -45,6 +45,8 @@ export const KEEPER_LEVELS: Readonly<Record<KeeperLevel, KeeperConfig>> = {
 export const KEEPER = {
   /** 立つ線の x（ゴールラインの少し前） */
   lineX: -0.6,
+  /** コーナーキックなど、横から来る球のときに立つ線の x（ゴールラインのすぐ前） */
+  lateralLineX: -0.25,
   /** 腕を伸ばしたときの、足先から指先までの長さ [m] */
   reach: 2.35,
   bodyRadius: 0.28,
@@ -61,6 +63,14 @@ export const KEEPER = {
   farTime: 1.0,
   nearTime: 0.3,
   farTrust: 0.3,
+  /**
+   * 横から来る球のとき、予測をどれだけ割り引くか。
+   * ゴールラインをかすめる球は、少し曲がるだけで通過点の予測が何 m も動くので、
+   * 予測に飛びつかず、立ち位置の近くで待つ。
+   */
+  lateralTrust: 0.4,
+  /** 横から来る球のとき、飛びつきを決める時刻 [s]。予測が当てになるまで待つので、正面の球より遅い。 */
+  lateralDiveWindow: 0.2,
   /** ボールが目の前まで来ても残る、読み違いの割合 */
   nearDoubt: 0.35,
 } as const;
@@ -72,7 +82,14 @@ export interface KeeperPose {
 }
 
 /** キック前の立ち位置 */
+/** GK が立つ線の x。横から来る球のときは、後ろを通されないようゴールラインの近くに立つ。 */
+export function keeperLineX(spot: Spot): number {
+  return isNearGoalLine(spot) ? KEEPER.lateralLineX : KEEPER.lineX;
+}
+
 export function keeperStartZ(spot: Spot, hasWall: boolean): number {
+  // コーナーキックなど: ゴールの中央より、ボールから遠い側へ少し寄って立つ
+  if (isNearGoalLine(spot)) return (spot.z > 0 ? -1 : 1) * 0.8;
   // ボールとゴール中央を結ぶ線の上
   const onLine = spot.z * (KEEPER.lineX / spot.x);
   if (!hasWall) return onLine;
@@ -81,12 +98,12 @@ export function keeperStartZ(spot: Spot, hasWall: boolean): number {
   return onLine - nearSide * KEEPER.positioningBias;
 }
 
-export function keeperCapsule(pose: KeeperPose): Capsule {
+export function keeperCapsule(pose: KeeperPose, lineX: number = KEEPER.lineX): Capsule {
   const r = KEEPER.bodyRadius;
   const span = KEEPER.reach - 2 * r;
   return {
-    a: [KEEPER.lineX, r, pose.z],
-    b: [KEEPER.lineX, r + span * Math.cos(pose.lean), pose.z + span * Math.sin(pose.lean)],
+    a: [lineX, r, pose.z],
+    b: [lineX, r + span * Math.cos(pose.lean), pose.z + span * Math.sin(pose.lean)],
     radius: r,
   };
 }
@@ -95,6 +112,8 @@ export interface Keeper {
   pose(): KeeperPose;
   /** ボールの状態 y を見て、dt だけ動く */
   step(time: number, y: Float64Array, dt: number): void;
+  /** ボールに触れたら呼ぶ。それ以降は動かない（弾いた球を体で押し込まないように）。 */
+  stop(): void;
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -117,7 +136,14 @@ function trust(arrival: number): number {
   return KEEPER.farTrust + (1 - KEEPER.farTrust) * clamp(k, 0, 1);
 }
 
-export function createKeeper(config: KeeperConfig, startZ: number, seed: number): Keeper {
+export function createKeeper(
+  config: KeeperConfig,
+  startZ: number,
+  seed: number,
+  lineX: number = KEEPER.lineX,
+): Keeper {
+  /** 横から来る球（コーナーキックなど）か。予測する面と、動きを止める条件が変わる。 */
+  const lateral = lineX > KEEPER.lineX;
   const rng = createRng(seed ^ 0x9e3779b9);
   // 読み違いの向きと大きさは、1 本のキックの間は変わらない
   const errorZ = gaussian(rng) * config.predictionNoise;
@@ -130,10 +156,19 @@ export function createKeeper(config: KeeperConfig, startZ: number, seed: number)
   let nextUpdate = config.reactionTime;
   /** 飛びついたら true。それ以降は予測を更新しない。 */
   let committed = false;
+  let stopped = false;
 
   /** 等速直線運動を仮定した、立つ線への到達点 */
-  const predict = (y: Float64Array): Prediction => {
-    const arrival = (KEEPER.lineX - y[0]) / y[3];
+  /** ボールがまだ来る途中か（過ぎたか、離れていくなら false） */
+  const isIncoming = (y: Float64Array): boolean =>
+    lateral ? y[0] < 0.11 && Math.abs(y[2]) < 45 : y[3] > 1 && y[0] < lineX;
+
+  const predict = (y: Float64Array): Prediction | null => {
+    // 正面からの球は自分の立つ線、横からの球はゴールラインを、等速直線で通る点を読む。
+    // ゴールラインへ向かっていない球は、まだ読めない。
+    const plane = lateral ? 0 : lineX;
+    if (y[3] < 0.2) return prediction;
+    const arrival = (plane - y[0]) / y[3];
     const doubt = KEEPER.nearDoubt + (1 - KEEPER.nearDoubt) * Math.min(1, arrival / 0.8);
     return {
       z: clamp(y[2] + y[5] * arrival + errorZ * doubt, -limitZ, limitZ),
@@ -144,11 +179,14 @@ export function createKeeper(config: KeeperConfig, startZ: number, seed: number)
 
   return {
     pose: () => ({ z, lean }),
+    stop() {
+      stopped = true;
+      speed = 0;
+    },
     step(time, y, dt) {
-      if (time < config.reactionTime) return;
+      if (stopped || time < config.reactionTime) return;
       // ボールが自分の線を過ぎたか、跳ね返って離れていくなら、その場で止まる
-      const incoming = y[3] > 1 && y[0] < KEEPER.lineX;
-      if (!incoming) {
+      if (!isIncoming(y)) {
         speed = 0;
         return;
       }
@@ -159,7 +197,8 @@ export function createKeeper(config: KeeperConfig, startZ: number, seed: number)
       if (!prediction) return;
 
       // 横移動: 行き過ぎないよう、止まれる速さまでしか出さない
-      const goal = startZ + (prediction.z - startZ) * trust(prediction.arrival);
+      const belief = trust(prediction.arrival) * (lateral ? KEEPER.lateralTrust : 1);
+      const goal = startZ + (prediction.z - startZ) * belief;
       const gap = goal - z;
       const cruise = Math.min(config.maxSpeed, Math.sqrt(2 * config.acceleration * Math.abs(gap)));
       const wanted = Math.sign(gap) * cruise;
@@ -168,7 +207,8 @@ export function createKeeper(config: KeeperConfig, startZ: number, seed: number)
 
       // 飛びつき: 到達が近く、立ったままでは届かないときだけ体を倒す
       const reachGap = prediction.z - z;
-      if (prediction.arrival <= KEEPER.diveWindow && Math.abs(reachGap) > KEEPER.standRange) {
+      const window = lateral ? KEEPER.lateralDiveWindow : KEEPER.diveWindow;
+      if (prediction.arrival <= window && Math.abs(reachGap) > KEEPER.standRange) {
         committed = true;
       }
       const leanTarget = committed

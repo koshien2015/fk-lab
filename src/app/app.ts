@@ -3,7 +3,7 @@
  */
 import { createSoundKit } from '../audio/sound.ts';
 import { slowFactor } from '../fx/direction.ts';
-import { keeperStartZ, type KeeperPose } from '../match/keeper.ts';
+import { keeperLineX, keeperStartZ, type KeeperPose } from '../match/keeper.ts';
 import type { ShotResult } from '../match/shot.ts';
 import { OUTCOME_LABELS, verdictTime } from '../match/verdict.ts';
 import { jumpHeight, wallPlayers } from '../match/wall.ts';
@@ -39,7 +39,7 @@ import { createHud } from './hud.ts';
 import { createInverseMode } from './inverseMode.ts';
 import { createPlacement } from './placement.ts';
 import { createPreviewer } from './previewer.ts';
-import { DEFAULT_SETUP, toKickInput, toKickState, toScenario, type KickSetup } from './setup.ts';
+import { cornerSetup, DEFAULT_SETUP, toKickInput, toKickState, toScenario, type KickSetup } from './setup.ts';
 import { createStore } from './store.ts';
 
 /** 蹴った 1 本ぶんの記録 */
@@ -52,6 +52,8 @@ interface Shot {
 const AIM_HINT = '蹴る点・向き・強さを決めて「蹴る」。視点はドラッグで回せます。';
 const PLACE_HINT = 'ピッチをクリックまたはドラッグして、ボールを置く位置を選びます。';
 const INVERSE_HINT = 'ゴールの中の狙いたい点をクリックすると、そこに入る蹴り方を探します。';
+const CORNER_HINT =
+  'コーナーから直接ゴールを狙います。ゴールの側へ巻く回転をかけ、ピッチの内側へ打ち出すと入ります。';
 const FLIGHT_HINT = '下のバーでスロー再生や巻き戻しができます。設定を変えると構え直します。';
 
 /** 記録点 index での GK の姿勢 */
@@ -180,6 +182,7 @@ export function startApp(root: HTMLElement): void {
     actors.setWallLift(0);
     actors.setKeeper(
       setup.keeper === 'none' ? null : { z: keeperStartZ(setup.spot, players.length > 0), lean: 0 },
+      keeperLineX(setup.spot),
     );
     net?.showRest();
     banner.setVisible(false);
@@ -293,6 +296,12 @@ export function startApp(root: HTMLElement): void {
       inverseStyle = style;
       panel.setInverse({ active: inverse.isActive(), style });
     },
+    onCorner: (side) => {
+      if (placement.isActive()) setPlacing(false);
+      if (inverse.isActive()) setInverse(false);
+      store.set(cornerSetup(side, store.get()));
+      panel.setStatus(CORNER_HINT);
+    },
     onLegend: (legend) => {
       if (placement.isActive()) setPlacing(false);
       if (inverse.isActive()) setInverse(false);
@@ -323,7 +332,7 @@ export function startApp(root: HTMLElement): void {
     trail.reveal(sample.index);
     hud.update(sample);
     arrows.update(sample);
-    actors.setKeeper(keeperPoseAt(result, sample.index));
+    actors.setKeeper(keeperPoseAt(result, sample.index), keeperLineX(setup.spot));
     actors.setWallLift(jumpHeight(current.time, setup.wall));
     net?.showMotion(result.net, current.time);
     timeline.render(current);

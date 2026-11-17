@@ -1,7 +1,7 @@
 /**
  * 蹴り方の設定（ユーザーが決めるもの）と、お手本の設定。
  */
-import { aimAzimuthDeg, type Spot } from '../field/placement.ts';
+import { aimAzimuthDeg, cornerSpot, type Spot } from '../field/placement.ts';
 import type { KeeperLevel } from '../match/keeper.ts';
 import type { ShotScenario } from '../match/shot.ts';
 import type { WallSetup } from '../match/wall.ts';
@@ -87,3 +87,21 @@ export const DEFAULT_SETUP: KickSetup = {
   wall: { count: 4, offset: 0, jump: false, jumpDelay: 0.15 },
   keeper: 'normal',
 };
+
+/**
+ * コーナーキックから直接ゴールを狙う設定。side は +1 が右コーナー、−1 が左コーナー。
+ * ゴールの側へ巻く回転をかけ、ピッチの内側へ打ち出す。数値は逆算モードで求めたもの。
+ */
+export function cornerSetup(side: 1 | -1, current: KickSetup): KickSetup {
+  return {
+    ...current,
+    spot: cornerSpot(side),
+    // コーナーキックでは、守備側はボールの近くに壁を作れない
+    wall: { ...current.wall, count: 0 },
+    // ニアポスト側の上の隅を狙う（ファー側へ流すと、GK の正面を通るので止められやすい）
+    contact: [-side * 0.371, -0.1],
+    aimDeg: -side * 12.276,
+    elevationDeg: 14.708,
+    power: 0.817,
+  };
+}

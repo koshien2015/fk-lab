@@ -26,6 +26,8 @@ export interface PanelActions {
   readonly onToggleInverse: () => void;
   readonly onInverseStyle: (style: SpinStyle) => void;
   readonly onLegend: (legend: Legend) => void;
+  /** コーナーキックの位置に置く（+1: 右、−1: 左） */
+  readonly onCorner: (side: 1 | -1) => void;
 }
 
 export interface InverseState {
@@ -80,6 +82,11 @@ export function createPanel(
   paramStore: Store<PhysicsParams>,
   actions: PanelActions,
 ): PanelView {
+  const chip = (label: string, onClick: () => void): HTMLButtonElement => {
+    const button = h('button', { type: 'button', class: 'chip' }, label);
+    button.addEventListener('click', onClick);
+    return button;
+  };
   const picker = createContactPicker((contact) => store.set({ contact }));
   const spin = h('p', { class: 'spin-text' });
   const maxSpeed = (): number => {
@@ -148,11 +155,6 @@ export function createPanel(
     return { choice, button };
   });
 
-  const chip = (label: string, onClick: () => void): HTMLButtonElement => {
-    const button = h('button', { type: 'button', class: 'chip' }, label);
-    button.addEventListener('click', onClick);
-    return button;
-  };
   const arrows = chip('力ベクトル', actions.onToggleArrows);
   const previewLine = chip('予測線', actions.onTogglePreview);
   const pin = chip('この軌道を残す', actions.onPin);
@@ -185,7 +187,14 @@ export function createPanel(
       spin,
     ),
     h('div', { class: 'group sliders' }, aim.element, elevation.element, power.element),
-    h('div', { class: 'group row' }, place, distance),
+    h(
+      'div',
+      { class: 'group row' },
+      place,
+      distance,
+      chip('左コーナー', () => actions.onCorner(-1)),
+      chip('右コーナー', () => actions.onCorner(1)),
+    ),
     h('div', { class: 'group row' }, reroll, seedLabel),
     h('div', { class: 'group sliders defence' }, wallCount.element, wallOffset.element, wallJumpDelay.element),
     h(

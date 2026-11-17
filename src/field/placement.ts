@@ -32,3 +32,14 @@ export function aimAzimuthDeg(spot: Spot): number {
 export function distanceToGoal(spot: Spot): number {
   return Math.hypot(spot.x, spot.z);
 }
+
+/** コーナーアークの中の、ボールを置く位置。side は +1 が右（z > 0）、−1 が左。 */
+export function cornerSpot(side: 1 | -1): Spot {
+  const inset = FIELD.cornerArcRadius * 0.35;
+  return { x: -inset, z: side * (FIELD.width / 2 - inset) };
+}
+
+/** ゴールラインのすぐそば（コーナーキックなど、横からゴールを狙う位置）か */
+export function isNearGoalLine(spot: Spot): boolean {
+  return spot.x > -2;
+}

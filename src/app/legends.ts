@@ -39,8 +39,8 @@ export const LEGENDS: readonly Legend[] = [
     setup: {
       spot: { x: -29, z: 6 },
       contact: [0, 0],
-      aimDeg: -5.959,
-      elevationDeg: 12.857,
+      aimDeg: -6.296,
+      elevationDeg: 13.063,
       power: 1,
       seed: 3,
       wall: { count: 4, offset: 0, jump: true, jumpDelay: 0.2 },

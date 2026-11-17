@@ -11,9 +11,9 @@ import { sphereCapsuleContact, type Capsule } from './geometry.ts';
 import { FRAME_CAPSULES, isInsideGoal } from './goalFrame.ts';
 import {
   createKeeper,
-  KEEPER,
   KEEPER_LEVELS,
   keeperCapsule,
+  keeperLineX,
   keeperStartZ,
   type KeeperConfig,
   type KeeperLevel,
@@ -79,9 +79,14 @@ const EVENT_SPEED = 0.8;
 /** ゴール後・アウト後に、ボールの行方を見せておく時間 [s] */
 const AFTER_GOAL = 2.0;
 const AFTER_OUT = 0.7;
+const AFTER_SAVE = 1.0;
 /** 止まったとみなす速さ [m/s] */
 const STOPPED_SPEED = 0.25;
 const MAX_TIME = 8;
+/** GK が弾いた球の、前へ向かう速さの割合（当たる前のゴール方向の速さに対して） */
+const PARRY = 0.3;
+/** 弾いた球が前へ向かう速さの下限 [m/s]（ゴールライン上にこぼれないように） */
+const PARRY_MIN_SPEED = 1.5;
 
 function isOutOfPlay(c: Vec3, radius: number): boolean {
   return (c[0] > radius && !isInsideGoal(c, radius)) || Math.abs(c[2]) > FIELD.width / 2 + radius;
@@ -119,8 +124,9 @@ export function simulateShot(
 
   const players = wallPlayers(scenario.spot, scenario.wall);
   const config = scenario.keeper === 'none' ? null : KEEPER_LEVELS[scenario.keeper];
+  const lineX = keeperLineX(scenario.spot);
   const keeper = config
-    ? createKeeper(config, keeperStartZ(scenario.spot, players.length > 0), scenario.seed)
+    ? createKeeper(config, keeperStartZ(scenario.spot, players.length > 0), scenario.seed, lineX)
     : null;
   const dt = options.dt ?? 0.001;
 
@@ -130,6 +136,7 @@ export function simulateShot(
   const keeperLean: number[] = [];
   let goalAt: number | null = null;
   let flightEnd: number | null = null;
+  let savedAt: number | null = null;
   let outAt: number | null = null;
 
   const note = (kind: ShotEventKind, time: number, y: Float64Array, speed: number): void => {
@@ -138,20 +145,23 @@ export function simulateShot(
     events.push({ t: time, kind, position: [y[0], y[1], y[2]], speed });
   };
 
-  /** カプセルの並びとの衝突。当たったら出来事を記録する。 */
+  /** カプセルの並びとの衝突。当たったら出来事を記録し、true を返す。 */
   const hitCapsules = (
     y: Float64Array,
     time: number,
     capsules: readonly Capsule[],
     surface: Surface,
     kind: ShotEventKind,
-  ): void => {
+  ): boolean => {
+    let touched = false;
     for (const capsule of capsules) {
       const contact = sphereCapsuleContact([y[0], y[1], y[2]], R, capsule);
       if (!contact) continue;
+      touched = true;
       const impact = applyContact(y, contact, surface, params);
       if (impact > EVENT_SPEED) note(kind, time, y, impact);
     }
+    return touched;
   };
 
   /** 地面に触れたら true（転がっているだけの接触も含む） */
@@ -211,8 +221,14 @@ export function simulateShot(
       const lift = jumpHeight(time, scenario.wall);
       hitCapsules(y, time, players.map((player) => wallCapsule(player, lift)), body, 'wall');
     }
-    if (keeper && Math.abs(y[0] - KEEPER.lineX) < 1) {
-      hitCapsules(y, time, [keeperCapsule(keeper.pose())], body, 'keeper');
+    if (keeper && Math.abs(y[0] - lineX) < 1) {
+      const touched = hitCapsules(y, time, [keeperCapsule(keeper.pose(), lineX)], body, 'keeper');
+      // GK は当たった球をゴールの外（前）へ弾く。体の横に当たってゴールへ押し込むことはない。
+      if (touched) {
+        keeper.stop();
+        savedAt ??= time;
+        if (y[3] > -PARRY_MIN_SPEED) y[3] = -Math.max(PARRY_MIN_SPEED, PARRY * Math.abs(y[3]));
+      }
     }
 
     const center: Vec3 = [y[0], y[1], y[2]];
@@ -235,6 +251,8 @@ export function simulateShot(
 
     if (goalAt !== null) return time > goalAt + AFTER_GOAL;
     if (outAt !== null) return time > outAt + AFTER_OUT;
+    // GK が弾いた球は、こぼれ球を押さえたものとして、少し見せてから終える
+    if (savedAt !== null) return time > savedAt + AFTER_SAVE;
     return y[1] <= R + 1e-3 && speed < STOPPED_SPEED;
   };
 
