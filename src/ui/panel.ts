@@ -134,6 +134,12 @@ export function createPanel(
     format: (v) => (v === 0 ? '自動' : `${v > 0 ? '中央へ' : '外へ'} ${Math.abs(v).toFixed(2)} m`),
     onInput: (offset) => setWall({ offset }),
   });
+  const wallJumpDelay = createSliderRow({
+    label: '壁が跳ぶタイミング',
+    ...SETUP_LIMITS.wallJumpDelay,
+    format: (v) => `蹴ってから ${v.toFixed(2)} 秒後`,
+    onInput: (jumpDelay) => setWall({ jumpDelay }),
+  });
   const wallJump = h('button', { type: 'button', class: 'chip' }, '壁がジャンプ');
   wallJump.addEventListener('click', () => setWall({ jump: !store.get().wall.jump }));
   const keepers = KEEPER_CHOICES.map((choice) => {
@@ -181,7 +187,7 @@ export function createPanel(
     h('div', { class: 'group sliders' }, aim.element, elevation.element, power.element),
     h('div', { class: 'group row' }, place, distance),
     h('div', { class: 'group row' }, reroll, seedLabel),
-    h('div', { class: 'group sliders defence' }, wallCount.element, wallOffset.element),
+    h('div', { class: 'group sliders defence' }, wallCount.element, wallOffset.element, wallJumpDelay.element),
     h(
       'div',
       { class: 'group row' },
@@ -218,6 +224,8 @@ export function createPanel(
     setText(distance, `ゴールまで ${distanceToGoal(setup.spot).toFixed(1)} m`);
     wallCount.render(setup.wall.count);
     wallOffset.render(setup.wall.offset);
+    wallJumpDelay.render(setup.wall.jumpDelay);
+    wallJumpDelay.element.hidden = !setup.wall.jump;
     wallJump.setAttribute('aria-pressed', String(setup.wall.jump));
     for (const { choice, button } of keepers) {
       button.setAttribute('aria-pressed', String(choice.value === setup.keeper));

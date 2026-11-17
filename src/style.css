@@ -212,3 +212,4 @@ a { color: #7cc4ff; }
   .timeline .play { min-width: 64px; }
   .why { left: 6px; bottom: 98px; width: calc(100% - 12px); max-height: 56%; padding: 8px 10px; }
 }
+.slider-row[hidden] { display: none; }

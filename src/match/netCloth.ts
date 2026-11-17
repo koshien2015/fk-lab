@@ -48,7 +48,7 @@ export const NET = {
   /** ボールと網の摩擦（接線方向の速度差を 1 回の接触で詰める割合） */
   grip: 0.25,
   /** 網に触れている間、ボールの勢いが網の擦れで失われる速さ [1/s] */
-  contactLoss: 5,
+  contactLoss: 12,
 } as const;
 
 export interface NetModel {

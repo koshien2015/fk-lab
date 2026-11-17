@@ -101,6 +101,9 @@ export function startApp(root: HTMLElement): void {
   let flight: Flight<Shot> | null = null;
   let view = { arrows: true, preview: true };
   let rate = 1;
+  /** 逆算とキックの通し番号。あとから出した依頼の結果だけを使う。 */
+  let solveSeq = 0;
+  let kickSeq = 0;
   /** 解説パネルを出し終えたキック（同じキックで何度も開き直さない） */
   let explained: Shot | null = null;
 
@@ -115,6 +118,8 @@ export function startApp(root: HTMLElement): void {
 
   const toolbar = createToolbar({
     onCamera: (mode) => {
+      // 位置を選んでいる最中に視点を変えると、ドラッグがボールと視点の両方を動かしてしまう
+      if (placement.isActive()) setPlacing(false);
       rig.setMode(mode, store.get().spot);
       renderToolbar();
     },
@@ -201,11 +206,13 @@ export function startApp(root: HTMLElement): void {
   /** 逆算: 狙う点に入る蹴り方を Worker で探し、設定に反映する */
   const solve = async (target: GoalTarget): Promise<void> => {
     const setup = store.get();
+    const seq = ++solveSeq;
     inverse.showTarget(target);
     panel.setStatus('蹴り方を探しています…');
     try {
       const solution = await sim.solve({ setup, target, style: inverseStyle }, getParams());
-      if (setup !== store.get()) return;
+      // 続けてクリックされたら、最後のクリックの結果だけを使う
+      if (seq !== solveSeq) return;
       searchLines.play(solution.candidates);
       store.set(solution.patch);
       const found = solution.miss < 0.3;
@@ -241,10 +248,11 @@ export function startApp(root: HTMLElement): void {
     showAim(setup);
     sound.unlock();
     const params = getParams();
+    const seq = ++kickSeq;
     try {
       const state = toKickState(setup, params);
       const result = await sim.shot(state, params, toScenario(setup));
-      if (setup !== store.get() || params !== getParams()) return;
+      if (seq !== kickSeq || setup !== store.get() || params !== getParams()) return;
       trail.setTrajectory(result.trajectory);
       const shot: Shot = { result, setup, kick: state };
       banner.set(result.outcome, shotLabel(shot, params).split(' → ')[0]);

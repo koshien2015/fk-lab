@@ -23,10 +23,13 @@ export function createPreviewer(
     running = true;
     const params = getParams();
     try {
-      // 予測線は、何にも当たらない飛翔をゴールラインまで描く
-      const trajectory = await sim.simulate(toKickState(setup, params), params, {
+      // 予測線は、壁と GK のいない状態でゴールラインまで描く（地面でのバウンドと転がりは含む）
+      const { trajectory } = await sim.shot(toKickState(setup, params), params, {
+        spot: setup.spot,
+        wall: { ...setup.wall, count: 0 },
+        keeper: 'none',
         seed: setup.seed,
-        stopAtX: params.radius,
+        stopAtGoalLine: true,
       });
       onResult(trajectory, setup);
     } catch (error) {

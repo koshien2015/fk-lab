@@ -37,6 +37,8 @@ export interface ShotScenario {
   readonly wall: WallSetup;
   readonly keeper: KeeperLevel | 'none';
   readonly seed: number;
+  /** ボールがゴールラインに届いたら、そこで打ち切る（予測線用） */
+  readonly stopAtGoalLine?: boolean;
 }
 
 export interface ShotResult {
@@ -85,14 +87,15 @@ function isOutOfPlay(c: Vec3, radius: number): boolean {
   return (c[0] > radius && !isInsideGoal(c, radius)) || Math.abs(c[2]) > FIELD.width / 2 + radius;
 }
 
-function judge(events: readonly ShotEvent[]): ShotOutcome {
+function judge(events: readonly ShotEvent[], hasKeeper: boolean): ShotOutcome {
   const has = (kind: ShotEventKind): boolean => events.some((event) => event.kind === kind);
   if (has('goal')) return 'goal';
   if (has('keeper')) return 'save';
   if (has('post')) return 'post';
   if (has('wall')) return 'wall';
-  // 何にも当たらずにピッチの中で止まった球は、GK が拾う
-  return has('out') ? 'out' : 'save';
+  if (has('out')) return 'out';
+  // 何にも当たらずにピッチの中で止まった球は、GK がいれば拾う。いなければ枠に届かなかった扱い。
+  return hasKeeper ? 'save' : 'out';
 }
 
 /** 記録したコマを 1 本の配列にまとめる */
@@ -126,6 +129,7 @@ export function simulateShot(
   const keeperZ: number[] = [];
   const keeperLean: number[] = [];
   let goalAt: number | null = null;
+  let flightEnd: number | null = null;
   let outAt: number | null = null;
 
   const note = (kind: ShotEventKind, time: number, y: Float64Array, speed: number): void => {
@@ -150,20 +154,22 @@ export function simulateShot(
     }
   };
 
-  const hitGround = (y: Float64Array, time: number): void => {
-    if (y[1] >= R) return;
+  /** 地面に触れたら true（転がっているだけの接触も含む） */
+  const hitGround = (y: Float64Array, time: number): boolean => {
+    if (y[1] >= R) return false;
     const impact = applyContact(y, { normal: [0, 1, 0], depth: R - y[1] }, ground, params);
     if (impact > EVENT_SPEED) note('ground', time, y, impact);
-    if (impact >= REST_SPEED) return;
+    if (impact >= REST_SPEED) return true;
     // 転がっている間は、転がり抵抗で減速する
     const speed = Math.hypot(y[3], y[5]);
-    if (speed <= 0) return;
+    if (speed <= 0) return true;
     const keep = Math.max(0, speed - params.rollingResistance * params.gravity * dt) / speed;
     y[3] *= keep;
     y[5] *= keep;
     y[6] *= keep;
     y[7] *= keep;
     y[8] *= keep;
+    return true;
   };
 
   // ネットは、ボールがゴールに近づいてから計算を始める（近づかないキックでは計算しない）
@@ -197,7 +203,8 @@ export function simulateShot(
     keeper?.step(time, y, dt);
     const before = events.length;
 
-    hitGround(y, time);
+    // 蹴った直後の地面との接触は除く（置いたボールは最初から地面に触れている）
+    const grounded = hitGround(y, time) && time > 0.05;
     if (y[0] > -1) hitCapsules(y, time, FRAME_CAPSULES, frame, 'post');
     hitNet(y, time);
     if (players.length > 0) {
@@ -219,7 +226,12 @@ export function simulateShot(
         note('out', time, y, speed);
       }
     }
-    if (events.length > before) control.freezeContributions();
+    // 何かに当たったら（転がり始めた場合も含めて）、そこから先は飛翔として数えない
+    if (events.length > before || grounded) {
+      control.freezeContributions();
+      flightEnd ??= time;
+    }
+    if (scenario.stopAtGoalLine && y[0] >= R) return true;
 
     if (goalAt !== null) return time > goalAt + AFTER_GOAL;
     if (outAt !== null) return time > outAt + AFTER_OUT;
@@ -237,9 +249,9 @@ export function simulateShot(
 
   return {
     trajectory,
-    outcome: judge(events),
+    outcome: judge(events, config !== null),
     events,
-    flightTime: events[0]?.t ?? trajectory.final.t,
+    flightTime: flightEnd ?? trajectory.final.t,
     net: netSim ? packNet(netStart, NET.dt * NET_FRAME_STEPS, netFrames) : null,
     wallPlayers: players,
     keeper: { config, z: Float64Array.from(keeperZ), lean: Float64Array.from(keeperLean) },

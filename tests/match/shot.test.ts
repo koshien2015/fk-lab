@@ -230,6 +230,27 @@ describe('ゴールキーパー', () => {
   });
 });
 
+describe('グラウンダーと、届かない球', () => {
+  it('転がる球の寄与は、転がり始めた時点で止める（重力が何十 m も落としたことにならない）', () => {
+    const kick: KickState = { position: [-25, R, 0], velocity: [18, 0, 0], omega: [0, 0, 0] };
+    const r = simulateShot(kick, p, scenario({ spot: { x: -25, z: 0 } }));
+    expect(Math.abs(r.trajectory.contributions.gravity[1])).toBeLessThan(0.05);
+    expect(r.flightTime).toBeLessThan(0.2);
+  });
+  it('予測線用の打ち切り: ゴールラインに届いたら終わる', () => {
+    const kick: KickState = { position: [-25, R, 0], velocity: [20, 0, 0], omega: [0, 0, 0] };
+    const r = simulateShot(kick, p, scenario({ spot: { x: -25, z: 0 }, stopAtGoalLine: true }));
+    expect(r.trajectory.final.position[0]).toBeGreaterThanOrEqual(R);
+    expect(r.trajectory.final.position[0]).toBeLessThan(R + 0.1);
+    expect(r.trajectory.count).toBeGreaterThan(50);
+  });
+  it('GK がいないのに届かなかった球は、セーブではなく枠外', () => {
+    const kick: KickState = { position: [-50, R, 0], velocity: [8, 1, 0], omega: [0, 0, 0] };
+    expect(simulateShot(kick, p, scenario({ spot: { x: -50, z: 0 } })).outcome).toBe('out');
+    expect(simulateShot(kick, p, scenario({ spot: { x: -50, z: 0 }, keeper: 'easy' })).outcome).toBe('save');
+  });
+});
+
 describe('力ごとの寄与は、最初に何かに当たるまでの飛翔ぶんを数える', () => {
   it('ゴールに入ったあとネットで止まっても、寄与は飛翔中の値のまま', () => {
     const kick: KickState = { position: [-20, R, 0], velocity: [26, 7, -1], omega: [0, -50, 0] };

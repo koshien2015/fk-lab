@@ -23,6 +23,8 @@ export interface TrailView {
   setTrajectory(tr: Trajectory): void;
   /** 記録点 index まで描く */
   reveal(index: number): void;
+  /** 使い終わったら呼ぶ（GPU 上の資源を解放する） */
+  dispose(): void;
 }
 
 export interface TrailStyle {
@@ -61,6 +63,10 @@ export function createTrail({ width = 3.5, opacity = 0.95, color: fixed }: Trail
     },
     reveal(index) {
       line.geometry.instanceCount = Math.min(Math.max(index, 0), segments);
+    },
+    dispose() {
+      line.geometry.dispose();
+      material.dispose();
     },
   };
 }

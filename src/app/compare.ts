@@ -3,7 +3,7 @@
  */
 import * as THREE from 'three';
 import type { Trajectory } from '../physics/types.ts';
-import { createTrail } from '../scene/trail.ts';
+import { createTrail, type TrailView } from '../scene/trail.ts';
 import { h } from '../ui/dom.ts';
 
 const COLORS = ['#ff8fab', '#8ce99a', '#b197fc', '#ffa94d'] as const;
@@ -20,7 +20,7 @@ export interface Compare {
 interface Pinned {
   readonly color: string;
   readonly label: string;
-  readonly line: THREE.Object3D;
+  readonly trail: TrailView;
 }
 
 export function createCompare(): Compare {
@@ -28,6 +28,11 @@ export function createCompare(): Compare {
   const element = h('ul', { class: 'overlay compare' });
   let pinned: readonly Pinned[] = [];
   let next = 0;
+
+  const remove = ({ trail }: Pinned): void => {
+    object.remove(trail.object);
+    trail.dispose();
+  };
 
   const render = (): void => {
     element.replaceChildren(
@@ -50,14 +55,14 @@ export function createCompare(): Compare {
       trail.reveal(trajectory.count);
       object.add(trail.object);
       // 古いものから消して、色の数までに収める
-      const all = [...pinned, { color, label, line: trail.object }];
+      const all = [...pinned, { color, label, trail }];
       const dropped = all.slice(0, Math.max(0, all.length - COLORS.length));
-      for (const { line } of dropped) object.remove(line);
+      for (const old of dropped) remove(old);
       pinned = all.slice(dropped.length);
       render();
     },
     clear() {
-      for (const { line } of pinned) object.remove(line);
+      for (const old of pinned) remove(old);
       pinned = [];
       render();
     },
